@@ -9,6 +9,7 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.net.SocketException;
+import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
 
 public class MiSocketStream implements AutoCloseable {
@@ -40,6 +41,14 @@ public class MiSocketStream implements AutoCloseable {
 
     public String recibeMensaje() throws IOException {
         return entrada.readLine();
+    }
+
+    public void setSoTimeout(int timeoutMs) throws SocketException {
+        socket.setSoTimeout(timeoutMs);
+    }
+
+    public SocketAddress getRemoteSocketAddress() {
+        return socket.getRemoteSocketAddress();
     }
 
     @Override

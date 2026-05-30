@@ -11,10 +11,13 @@ Esta carpeta ya quedo ordenada para trabajar como proyecto JavaSE y probar desde
 2. `src/`
    - Codigo fuente final y ordenado segun la guia.
 
-3. `out/`
+3. `EVENTO5_REMOTO.md`
+   - Pasos para ejecutar el evento 5 cuando el servidor y el cliente estan en casas distintas.
+
+4. `out/`
    - Archivos `.class` generados al compilar.
 
-4. `respaldo_original/`
+5. `respaldo_original/`
    - Archivos originales, ZIP/RAR, PDF de apoyo y copias extraidas.
    - No es necesario abrirlo para probar la entrega, solo queda como respaldo.
 
