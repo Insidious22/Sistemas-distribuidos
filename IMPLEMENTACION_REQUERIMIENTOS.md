@@ -8,6 +8,8 @@ Se creo una entrega limpia en `src/` respetando los paquetes pedidos por la guia
 src/socket/sinconexion/simplex/
 src/socket/conconexion/unilateral/
 src/socket/conconexion/stream/
+src/rmi/eco/
+src/rmi/sum/
 ```
 
 Los ZIP de `respaldo_original/no tocar/` se usaron solo como respaldo de consulta.
@@ -38,6 +40,80 @@ java -cp out paquete.Clase argumentos
 ```
 
 En un proyecto JavaSE del IDE, use `src/` como carpeta de codigo fuente y ejecute cada clase `main` con los argumentos indicados en cada escenario.
+
+## RMI - Servicio remoto Eco
+
+Archivos:
+
+- `src/rmi/eco/ServicioEco.java`
+- `src/rmi/eco/ServicioEcoImpl.java`
+- `src/rmi/eco/ServidorEco.java`
+- `src/rmi/eco/ClienteEco.java`
+
+Implementacion:
+
+- `ServicioEco` define el contrato remoto con `Remote` y `RemoteException`.
+- `ServicioEcoImpl` exporta el objeto remoto con `UnicastRemoteObject`.
+- `ServidorEco` crea o reutiliza el registro RMI local, publica el servicio y muestra los nombres registrados.
+- `ClienteEco` localiza el registro, busca el servicio y envia mensajes de prueba.
+
+Comandos de prueba:
+
+Terminal 1:
+
+```powershell
+java -cp out rmi.eco.ServidorEco 1099 eco
+```
+
+Terminal 2:
+
+```powershell
+java -cp out rmi.eco.ClienteEco localhost 1099 eco "Hola!" "Adios!"
+```
+
+Si se ejecuta sin argumentos, el servidor y el cliente piden los datos por consola y usan valores por defecto.
+
+## RMI - Servicio remoto Sum
+
+Objetivo:
+
+Producir un programa cliente-servidor basado en Java RMI. El servidor ofrece el servicio de sumar 2 numeros enteros y regresa el resultado al cliente.
+
+Archivos:
+
+- `src/rmi/sum/ServicioSum.java`
+- `src/rmi/sum/ServicioSumImpl.java`
+- `src/rmi/sum/ServidorSum.java`
+- `src/rmi/sum/ClienteSum.java`
+
+Implementacion:
+
+- `ServicioSum` define el metodo remoto `sumar(int, int)`.
+- `ServicioSumImpl` realiza la suma y devuelve el entero resultante.
+- `ServidorSum` crea o reutiliza el registro RMI, publica el servicio con el nombre `sum` y queda activo.
+- `ClienteSum` localiza el servicio remoto, envia dos enteros y muestra el resultado.
+
+Comandos de prueba:
+
+Terminal 1:
+
+```powershell
+java -cp out rmi.sum.ServidorSum 50000 sum
+```
+
+Terminal 2:
+
+```powershell
+java -cp out rmi.sum.ClienteSum localhost 50000 sum 8 12
+```
+
+Resultado esperado:
+
+```text
+Busqueda completa
+Servicio de Sum:
+8 + 12 = 20
+```
 
 ## Conceptos base para entender la practica
 
