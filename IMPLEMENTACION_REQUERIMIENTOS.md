@@ -142,13 +142,23 @@ Implementacion:
 
 - `ServidorAcelTCP` escucha en el puerto `7500`.
 - Cada conexion aceptada se delega a `HiloDespachador`.
-- El despachador procesa el string del acelerografo y responde un `ACK_TCP`.
+- El despachador mantiene la conexion abierta y procesa multiples lecturas del mismo cliente.
+- El cliente se identifica con `HELLO;ID_ACEL:<id>` al iniciar la sesion.
+- Cada lectura incluye `SEQ` para distinguir mensajes consecutivos del mismo cliente.
+- El despachador procesa el string del acelerografo y responde un `ACK_TCP` por cada lectura.
 - `EstacionAcelTCP` mide con `System.nanoTime()` desde el envio del payload hasta la recepcion del ACK.
+- Despues del ACK, el cliente reporta su RTT al servidor con `METRICA_TCP`, permitiendo promediar por cliente en el servidor.
 
 Levantar solo el servidor:
 
 ```powershell
 java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500
+```
+
+Cliente TCP permanente:
+
+```powershell
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23 7500 EC-UCON02 60000 0
 ```
 
 ### Modulo RMI
@@ -186,6 +196,14 @@ java -cp out rmi.acelerografo.ServidorAcelRMI 1099 acelerografo 192.168.X.X
 ```
 
 En el laboratorio no use `localhost` ni `127.0.0.1` para las pruebas con clientes en otras maquinas.
+
+Logs:
+
+- `logs/servidor_tcp_metricas.log`: lecturas recibidas por el servidor TCP y tiempo de procesamiento local.
+- `logs/servidor_tcp_metricas.log`: tambien guarda `rttPromedioMs`, `rttMinMs` y `rttMaxMs` por cliente TCP.
+- `logs/cliente_tcp_metricas.log`: tiempo `T_TX` medido por el cliente TCP desde envio hasta ACK.
+- `logs/servidor_rmi_metricas.log`: invocaciones recibidas por el servidor RMI y tiempo de procesamiento local.
+- `logs/cliente_rmi_metricas.log`: tiempo `T_TX` medido por el cliente RMI durante la invocacion remota.
 
 ## Conceptos base para entender la practica
 

@@ -5,6 +5,7 @@ import java.io.InputStreamReader;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.Locale;
+import telemetria.RegistroMetricas;
 
 public class EstacionAcelRMI {
     private static final int PUERTO_DEFECTO = 1099;
@@ -44,9 +45,16 @@ public class EstacionAcelRMI {
                 double tTxMs = (tiempoFinal - tiempoInicial) / 1_000_000.0;
 
                 System.out.printf(Locale.US, "[METRICA RMI] Invocacion remota ejecutada en: %.4f ms.%n", tTxMs);
+                RegistroMetricas.escribir("cliente_rmi_metricas.log",
+                        RegistroMetricas.linea("RMI_CLIENTE", "idAcel=" + idAcel, "host=" + hostServidor,
+                                "puerto=" + puerto, "servicio=" + nombreServicio,
+                                "tTxMs=" + RegistroMetricas.ms(tTxMs), "x=" + x, "y=" + y, "z=" + z));
                 esperarSiguienteEnvio(intervaloMs, i, repeticiones);
             }
         } catch (Exception ex) {
+            RegistroMetricas.escribir("cliente_rmi_metricas.log",
+                    RegistroMetricas.linea("RMI_CLIENTE_ERROR", "error=" + ex.getClass().getSimpleName(),
+                            "detalle=" + ex.getMessage()));
             ex.printStackTrace();
         }
     }

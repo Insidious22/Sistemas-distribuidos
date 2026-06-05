@@ -33,6 +33,21 @@ Desde PowerShell, ubicado en esta carpeta:
 javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
 ```
 
+## Logs de metricas
+
+Los modulos de acelerografo crean automaticamente la carpeta `logs/`.
+
+Servidor TCP: `logs/servidor_tcp_metricas.log`
+Cliente TCP: `logs/cliente_tcp_metricas.log`
+Servidor RMI: `logs/servidor_rmi_metricas.log`
+Cliente RMI: `logs/cliente_rmi_metricas.log`
+
+Para dejar un cliente TCP conectado permanentemente, use `0` como cantidad de envios:
+
+```powershell
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23 7500 EC-UCON02 60000 0
+```
+
 ## Probar rapido RMI Eco
 
 Terminal 1:

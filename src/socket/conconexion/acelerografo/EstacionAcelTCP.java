@@ -7,11 +7,13 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import telemetria.RegistroMetricas;
 
 public class EstacionAcelTCP {
     private static final int PUERTO_DEFECTO = 7500;
     private static final long INTERVALO_DEFECTO_MS = 60000L;
     private static final String ID_ACEL_DEFECTO = "EC-UCON01";
+    private static final int REPETICIONES_PERMANENTE = 0;
 
     public static void main(String[] args) {
         try {
@@ -26,29 +28,41 @@ public class EstacionAcelTCP {
             long intervaloMs = args.length >= 4
                     ? Long.parseLong(args[3])
                     : leerEntero("Intervalo entre envios en ms", (int) INTERVALO_DEFECTO_MS);
-            int repeticiones = args.length >= 5 ? Integer.parseInt(args[4]) : leerEntero("Cantidad de envios", 1);
+            int repeticiones = args.length >= 5
+                    ? Integer.parseInt(args[4])
+                    : leerEntero("Cantidad de envios, 0 = permanente", REPETICIONES_PERMANENTE);
 
-            for (int i = 0; i < repeticiones; i++) {
-                enviarLectura(hostServidor, puerto, idAcel, i);
-                esperarSiguienteEnvio(intervaloMs, i, repeticiones);
+            try (Socket socket = new Socket(hostServidor, puerto);
+                    BufferedReader entrada = new BufferedReader(
+                            new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                    PrintWriter salida = new PrintWriter(
+                            new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)) {
+
+                salida.println("HELLO;ID_ACEL:" + idAcel);
+                System.out.println("Servidor: " + entrada.readLine());
+                System.out.println("Cliente TCP permanente conectado. Use Ctrl + C para detener.");
+
+                int indice = 0;
+                while (repeticiones == REPETICIONES_PERMANENTE || indice < repeticiones) {
+                    enviarLectura(entrada, salida, hostServidor, puerto, idAcel, indice);
+                    indice++;
+                    esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
+                }
             }
         } catch (Exception ex) {
             ex.printStackTrace();
         }
     }
 
-    private static void enviarLectura(String hostServidor, int puerto, String idAcel, int indice) {
+    private static void enviarLectura(BufferedReader entrada, PrintWriter salida, String hostServidor, int puerto,
+            String idAcel, int indice) {
         double x = 0.020 + indice * 0.001;
         double y = -0.010 - indice * 0.001;
         double z = 0.980 + indice * 0.001;
-        String payload = LecturaTriaxial.crearPayload(idAcel, x, y, z);
+        int secuencia = indice + 1;
+        String payload = "SEQ:" + secuencia + ";" + LecturaTriaxial.crearPayload(idAcel, x, y, z);
 
-        try (Socket socket = new Socket(hostServidor, puerto);
-                BufferedReader entrada = new BufferedReader(
-                        new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-                PrintWriter salida = new PrintWriter(
-                        new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)) {
-
+        try {
             long tiempoInicial = System.nanoTime();
             salida.println(payload);
             String ack = entrada.readLine();
@@ -57,13 +71,23 @@ public class EstacionAcelTCP {
 
             System.out.println("ACK recibido: " + ack);
             System.out.printf(Locale.US, "[METRICA TCP] Registro enviado en: %.4f ms.%n", tTxMs);
+            salida.println("METRICA_TCP;ID_ACEL:" + idAcel + ";SEQ:" + secuencia + ";RTT_MS:"
+                    + RegistroMetricas.ms(tTxMs));
+            RegistroMetricas.escribir("cliente_tcp_metricas.log",
+                    RegistroMetricas.linea("TCP_CLIENTE", "idAcel=" + idAcel, "seq=" + secuencia,
+                            "host=" + hostServidor, "puerto=" + puerto, "tTxMs=" + RegistroMetricas.ms(tTxMs),
+                            "ack=" + ack, "payload=" + payload));
         } catch (Exception ex) {
+            RegistroMetricas.escribir("cliente_tcp_metricas.log",
+                    RegistroMetricas.linea("TCP_CLIENTE_ERROR", "idAcel=" + idAcel, "host=" + hostServidor,
+                            "puerto=" + puerto, "error=" + ex.getClass().getSimpleName(),
+                            "detalle=" + ex.getMessage()));
             ex.printStackTrace();
         }
     }
 
     private static void esperarSiguienteEnvio(long intervaloMs, int indice, int repeticiones) {
-        if (indice + 1 >= repeticiones) {
+        if (repeticiones != REPETICIONES_PERMANENTE && indice >= repeticiones) {
             return;
         }
         try {
