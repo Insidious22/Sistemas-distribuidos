@@ -28,6 +28,20 @@ Cambiar `EC-UCON02` por el ID asignado a cada estacion. El ultimo parametro `0` 
 java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23 7500 EC-UCON02 60000 0
 ```
 
+Para una rafaga de 1 mensaje por segundo durante 60 segundos:
+
+```powershell
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23 7500 EC-UCON02 1000 0 60
+```
+
+Parametros del cliente TCP:
+
+```text
+<ipServidor> <puerto> <idAcel> <intervaloMs> <repeticiones> <duracionSegundos>
+```
+
+Ejemplo: `1000 0 60` significa intervalo de 1000 ms, sin limite por cantidad fija, detenerse despues de 60 segundos.
+
 ## 5. Cliente RMI
 
 Cambiar `EC-UCON02` por el ID asignado a cada estacion.
@@ -72,4 +86,7 @@ En el servidor TCP, cada cliente queda identificado por `idAcel` y el log acumul
 - `metricasRtt`: cantidad de mediciones de ida y vuelta reportadas por el cliente.
 - `rttPromedioMs`: promedio real medido por el cliente desde envio hasta ACK.
 - `rttMinMs` y `rttMaxMs`: minimo y maximo por cliente.
+- `redEstimadaPromedioMs`: RTT menos tiempo de procesamiento del servidor.
+- `idaEstimadaPromedioMs`: mitad de la red estimada.
+- `vueltaEstimadaPromedioMs`: mitad de la red estimada.
 - `procesamientoPromedioMs`: tiempo promedio de parseo/procesamiento local del servidor.

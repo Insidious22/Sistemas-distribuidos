@@ -58,12 +58,18 @@ public class HiloDespachador implements Runnable {
                 if (linea.startsWith("METRICA_TCP;")) {
                     String idAcel = extraerCampo(linea, "ID_ACEL", idSesion);
                     double rttMs = Double.parseDouble(extraerCampo(linea, "RTT_MS", "0"));
+                    double redEstimadaMs = Double.parseDouble(extraerCampo(linea, "RED_ESTIMADA_MS", "0"));
+                    double idaEstimadaMs = Double.parseDouble(extraerCampo(linea, "IDA_ESTIMADA_MS", "0"));
+                    double vueltaEstimadaMs = Double.parseDouble(extraerCampo(linea, "VUELTA_ESTIMADA_MS", "0"));
                     estadisticas = CLIENTES.computeIfAbsent(idAcel,
                             id -> new EstadisticasCliente(id, String.valueOf(cliente.getRemoteSocketAddress())));
-                    estadisticas.registrarRttCliente(rttMs);
+                    estadisticas.registrarMetricaCliente(rttMs, redEstimadaMs, idaEstimadaMs, vueltaEstimadaMs);
                     RegistroMetricas.escribir("servidor_tcp_metricas.log",
                             RegistroMetricas.linea("TCP_RTT_REPORTADO_POR_CLIENTE", "idAcel=" + idAcel,
                                     "seq=" + extraerCampo(linea, "SEQ", "-"), "rttMs=" + RegistroMetricas.ms(rttMs),
+                                    "redEstimadaMs=" + RegistroMetricas.ms(redEstimadaMs),
+                                    "idaEstimadaMs=" + RegistroMetricas.ms(idaEstimadaMs),
+                                    "vueltaEstimadaMs=" + RegistroMetricas.ms(vueltaEstimadaMs),
                                     estadisticas.resumen()));
                     continue;
                 }
@@ -85,18 +91,23 @@ public class HiloDespachador implements Runnable {
 
     private static void procesarLectura(Socket cliente, PrintWriter salida, String payload,
             EstadisticasCliente estadisticas) {
+        Instant servidorRecibido = Instant.now();
         long tiempoInicial = System.nanoTime();
         LecturaTriaxial lectura = LecturaTriaxial.desdePayload(payload);
         long tiempoFinal = System.nanoTime();
         double procesamientoMs = (tiempoFinal - tiempoInicial) / 1_000_000.0;
         String seq = extraerCampo(payload, "SEQ", "-");
+        Instant servidorAck = Instant.now();
 
         estadisticas.registrarLectura(procesamientoMs);
         System.out.println("TCP recibido desde " + cliente.getRemoteSocketAddress() + " -> " + lectura + " SEQ=" + seq);
-        salida.println("ACK_TCP:" + lectura.getIdAcel() + ";SEQ:" + seq + ";RECIBIDO:" + Instant.now());
+        salida.println("ACK_TCP;ID_ACEL:" + lectura.getIdAcel() + ";SEQ:" + seq + ";SERVIDOR_RECIBIDO:"
+                + servidorRecibido + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:"
+                + RegistroMetricas.ms(procesamientoMs));
         RegistroMetricas.escribir("servidor_tcp_metricas.log",
                 RegistroMetricas.linea("TCP_LECTURA_RECIBIDA", "idAcel=" + lectura.getIdAcel(), "seq=" + seq,
-                        "cliente=" + cliente.getRemoteSocketAddress(),
+                        "cliente=" + cliente.getRemoteSocketAddress(), "servidorRecibido=" + servidorRecibido,
+                        "servidorAck=" + servidorAck,
                         "procesamientoMs=" + RegistroMetricas.ms(procesamientoMs), "payload=" + payload,
                         estadisticas.resumen()));
     }
