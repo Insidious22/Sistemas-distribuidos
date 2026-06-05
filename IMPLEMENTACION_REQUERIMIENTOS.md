@@ -8,6 +8,8 @@ Se creo una entrega limpia en `src/` respetando los paquetes pedidos por la guia
 src/socket/sinconexion/simplex/
 src/socket/conconexion/unilateral/
 src/socket/conconexion/stream/
+src/socket/conconexion/acelerografo/
+src/rmi/acelerografo/
 src/rmi/eco/
 src/rmi/sum/
 ```
@@ -114,6 +116,76 @@ Busqueda completa
 Servicio de Sum:
 8 + 12 = 20
 ```
+
+## Practica integradora - Telemetria de acelerografos
+
+Objetivo:
+
+Implementar un sistema distribuido de adquisicion de datos triaxiales para comparar Sockets TCP concurrentes contra Java RMI en una red fisica de laboratorio.
+
+Payload obligatorio:
+
+```text
+ID_ACEL:EC-UCON01;EJE_X:+0.024G;EJE_Y:-0.011G;EJE_Z:+0.981G;TIMESTAMP:2026-06-05T10:17:00Z
+```
+
+### Modulo TCP concurrente
+
+Archivos:
+
+- `src/socket/conconexion/acelerografo/LecturaTriaxial.java`
+- `src/socket/conconexion/acelerografo/HiloDespachador.java`
+- `src/socket/conconexion/acelerografo/ServidorAcelTCP.java`
+- `src/socket/conconexion/acelerografo/EstacionAcelTCP.java`
+
+Implementacion:
+
+- `ServidorAcelTCP` escucha en el puerto `7500`.
+- Cada conexion aceptada se delega a `HiloDespachador`.
+- El despachador procesa el string del acelerografo y responde un `ACK_TCP`.
+- `EstacionAcelTCP` mide con `System.nanoTime()` desde el envio del payload hasta la recepcion del ACK.
+
+Levantar solo el servidor:
+
+```powershell
+java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500
+```
+
+### Modulo RMI
+
+Archivos:
+
+- `src/rmi/acelerografo/ServicioAcelerografo.java`
+- `src/rmi/acelerografo/ServicioAcelerografoImpl.java`
+- `src/rmi/acelerografo/ServidorAcelRMI.java`
+- `src/rmi/acelerografo/EstacionAcelRMI.java`
+
+Interfaz remota:
+
+```java
+void registrarLecturaTriaxial(String idAcel, double x, double y, double z) throws RemoteException;
+```
+
+Implementacion:
+
+- `ServidorAcelRMI` publica el servicio `acelerografo` en el registro RMI.
+- Si se pasa la IP LAN como tercer argumento, configura `java.rmi.server.hostname` con esa IP.
+- Si no se pasa IP, intenta detectar automaticamente una direccion IPv4 no loopback.
+- `EstacionAcelRMI` mide con `System.nanoTime()` el tiempo de invocacion remota.
+
+Levantar solo el servidor:
+
+```powershell
+java -cp out rmi.acelerografo.ServidorAcelRMI 1099 acelerografo
+```
+
+Levantar servidor RMI forzando IP LAN real:
+
+```powershell
+java -cp out rmi.acelerografo.ServidorAcelRMI 1099 acelerografo 192.168.X.X
+```
+
+En el laboratorio no use `localhost` ni `127.0.0.1` para las pruebas con clientes en otras maquinas.
 
 ## Conceptos base para entender la practica
 
