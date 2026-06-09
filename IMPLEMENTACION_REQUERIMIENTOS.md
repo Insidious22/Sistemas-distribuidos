@@ -155,6 +155,12 @@ Levantar solo el servidor:
 java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500
 ```
 
+Para demostrar espera de semaforo con dos clientes, configure temporalmente un solo permiso:
+
+```powershell
+java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500 1
+```
+
 Cliente TCP permanente:
 
 ```powershell
@@ -201,9 +207,33 @@ Logs:
 
 - `logs/servidor_tcp_metricas.log`: lecturas recibidas por el servidor TCP y tiempo de procesamiento local.
 - `logs/servidor_tcp_metricas.log`: tambien guarda `rttPromedioMs`, `rttMinMs` y `rttMaxMs` por cliente TCP.
+- `logs/concurrencia_sismica.log`: movimientos del semaforo, espera en cola, entrada/salida de region critica y escritura segura.
 - `logs/cliente_tcp_metricas.log`: tiempo `T_TX` medido por el cliente TCP desde envio hasta ACK.
 - `logs/servidor_rmi_metricas.log`: invocaciones recibidas por el servidor RMI y tiempo de procesamiento local.
 - `logs/cliente_rmi_metricas.log`: tiempo `T_TX` medido por el cliente RMI durante la invocacion remota.
+
+## Concurrencia - Sincronizacion y exclusion mutua
+
+Archivo principal:
+
+- `src/socket/conconexion/acelerografo/AdministradorRecursosSismicos.java`
+
+Implementacion:
+
+- Usa `Semaphore(3, true)` para permitir maximo 3 lecturas concurrentes en procesamiento.
+- El parametro `true` activa equidad FIFO para reducir riesgo de inanicion de hilos.
+- El metodo `guardarEnBitacora(...)` es `synchronized`, por lo que solo un hilo puede escribir a la vez.
+- La bitacora compartida se escribe en `bitacora_sismica.txt`.
+- Se simula carga de CPU con un retardo de 500 ms por lectura procesada.
+
+Eventos registrados en `logs/concurrencia_sismica.log`:
+
+- `COLA_SEMAFORO_ESPERA`
+- `SEMAFORO_PERMISO_CONCEDIDO`
+- `REGION_CRITICA_ENTRADA`
+- `REGION_CRITICA_ESCRITURA_SEGURA`
+- `REGION_CRITICA_SALIDA`
+- `SEMAFORO_PERMISO_LIBERADO`
 
 ## Conceptos base para entender la practica
 

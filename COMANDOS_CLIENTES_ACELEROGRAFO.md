@@ -62,6 +62,28 @@ EC-UCON06
 
 Si aparece `Connection refused`, el servidor no esta levantado o el Firewall de Windows bloqueo los puertos `7500` o `1099`.
 
+## Logs de concurrencia del servidor
+
+El servidor TCP registra los movimientos de sincronizacion en:
+
+```text
+logs/concurrencia_sismica.log
+```
+
+Tambien guarda las lecturas en una bitacora protegida por `synchronized`:
+
+```text
+bitacora_sismica.txt
+```
+
+Eventos importantes:
+
+- `COLA_SEMAFORO_ESPERA`: el hilo llego y espera permiso.
+- `SEMAFORO_PERMISO_CONCEDIDO`: entro a uno de los 3 espacios concurrentes.
+- `REGION_CRITICA_ENTRADA`: intenta escribir en la bitacora compartida.
+- `REGION_CRITICA_ESCRITURA_SEGURA`: escritura protegida completada.
+- `SEMAFORO_PERMISO_LIBERADO`: libera el permiso para otro cliente.
+
 ## Logs generados
 
 Al ejecutar los clientes se crea automaticamente la carpeta `logs/`.

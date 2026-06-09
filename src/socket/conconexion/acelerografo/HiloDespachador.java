@@ -14,11 +14,16 @@ import telemetria.RegistroMetricas;
 
 public class HiloDespachador implements Runnable {
     private static final ConcurrentHashMap<String, EstadisticasCliente> CLIENTES = new ConcurrentHashMap<String, EstadisticasCliente>();
+    private static AdministradorRecursosSismicos recursosSismicos;
 
     private final Socket socket;
 
     public HiloDespachador(Socket socket) {
         this.socket = socket;
+    }
+
+    public static void configurarAdministradorRecursos(AdministradorRecursosSismicos administrador) {
+        recursosSismicos = administrador;
     }
 
     @Override
@@ -94,6 +99,7 @@ public class HiloDespachador implements Runnable {
         Instant servidorRecibido = Instant.now();
         long tiempoInicial = System.nanoTime();
         LecturaTriaxial lectura = LecturaTriaxial.desdePayload(payload);
+        obtenerAdministradorRecursos().procesarLecturaEstacion(lectura.getIdAcel(), payload);
         long tiempoFinal = System.nanoTime();
         double procesamientoMs = (tiempoFinal - tiempoInicial) / 1_000_000.0;
         String seq = extraerCampo(payload, "SEQ", "-");
@@ -122,5 +128,12 @@ public class HiloDespachador implements Runnable {
         }
         String valor = campos.get(campo);
         return valor == null || valor.trim().isEmpty() ? defecto : valor.trim();
+    }
+
+    private static synchronized AdministradorRecursosSismicos obtenerAdministradorRecursos() {
+        if (recursosSismicos == null) {
+            recursosSismicos = new AdministradorRecursosSismicos();
+        }
+        return recursosSismicos;
     }
 }

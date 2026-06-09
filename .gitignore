@@ -1,1 +1,4 @@
 logs/
+**/logs/
+bitacora_sismica.txt
+**/bitacora_sismica.txt

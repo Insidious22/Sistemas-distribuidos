@@ -39,8 +39,11 @@ Los modulos de acelerografo crean automaticamente la carpeta `logs/`.
 
 Servidor TCP: `logs/servidor_tcp_metricas.log`
 Cliente TCP: `logs/cliente_tcp_metricas.log`
+Concurrencia TCP: `logs/concurrencia_sismica.log`
 Servidor RMI: `logs/servidor_rmi_metricas.log`
 Cliente RMI: `logs/cliente_rmi_metricas.log`
+
+El servidor TCP tambien escribe la bitacora protegida por exclusion mutua en `bitacora_sismica.txt`.
 
 Para dejar un cliente TCP conectado permanentemente, use `0` como cantidad de envios:
 
@@ -82,6 +85,12 @@ Servidor TCP concurrente, puerto 7500:
 
 ```powershell
 java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500
+```
+
+Prueba de semaforo con 2 clientes y solo 1 permiso:
+
+```powershell
+java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500 1
 ```
 
 Servidor RMI, puerto 1099:
