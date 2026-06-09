@@ -19,6 +19,7 @@ public class ServidorAcelTCP {
 
             while (true) {
                 Socket socketCliente = servidor.accept();
+                System.out.println("Conexion TCP aceptada desde " + socketCliente.getRemoteSocketAddress());
                 Thread hilo = new Thread(new HiloDespachador(socketCliente), "hilo-acel-" + socketCliente.getPort());
                 hilo.start();
             }

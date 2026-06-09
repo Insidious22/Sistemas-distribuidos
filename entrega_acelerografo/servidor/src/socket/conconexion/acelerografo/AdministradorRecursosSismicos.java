@@ -31,6 +31,8 @@ public class AdministradorRecursosSismicos {
         long esperaInicialNs = System.nanoTime();
 
         try {
+            System.out.println("[Control] Estacion " + idEstacion + " esperando permiso del semaforo. Permisos disponibles: "
+                    + semaforoAdmision.availablePermits());
             RegistroMetricas.escribir("concurrencia_sismica.log",
                     RegistroMetricas.linea("COLA_SEMAFORO_ESPERA", "idEstacion=" + idEstacion,
                             "permisosDisponibles=" + semaforoAdmision.availablePermits(),
@@ -43,6 +45,8 @@ public class AdministradorRecursosSismicos {
             double esperaMs = (esperaFinalNs - esperaInicialNs) / 1_000_000.0;
             long timestampProcesamiento = System.currentTimeMillis();
 
+            System.out.println("[Admision] Permiso concedido a " + idEstacion + ". Espera: "
+                    + RegistroMetricas.ms(esperaMs) + " ms");
             RegistroMetricas.escribir("concurrencia_sismica.log",
                     RegistroMetricas.linea("SEMAFORO_PERMISO_CONCEDIDO", "idEstacion=" + idEstacion,
                             "esperaMs=" + RegistroMetricas.ms(esperaMs),
@@ -59,6 +63,7 @@ public class AdministradorRecursosSismicos {
         } finally {
             if (permisoAdquirido) {
                 semaforoAdmision.release();
+                System.out.println("[Liberacion] " + idEstacion + " libero el permiso del semaforo.");
                 RegistroMetricas.escribir("concurrencia_sismica.log",
                         RegistroMetricas.linea("SEMAFORO_PERMISO_LIBERADO", "idEstacion=" + idEstacion,
                                 "permisosDisponibles=" + semaforoAdmision.availablePermits(),
