@@ -55,4 +55,25 @@ public class EstadisticasCliente {
                 idAcel, direccionRemota, lecturasRecibidas, metricasReportadas, promedioRtt, minimo, maximo,
                 promedioRed, promedioIda, promedioVuelta, promedioProcesamiento, ultimaLecturaNs);
     }
+
+    public synchronized String[] resumenCampos() {
+        double promedioRtt = metricasReportadas == 0 ? 0.0 : sumaRttMs / metricasReportadas;
+        double promedioProcesamiento = lecturasRecibidas == 0 ? 0.0 : sumaProcesamientoMs / lecturasRecibidas;
+        double promedioRed = metricasReportadas == 0 ? 0.0 : sumaRedEstimadaMs / metricasReportadas;
+        double promedioIda = metricasReportadas == 0 ? 0.0 : sumaIdaEstimadaMs / metricasReportadas;
+        double promedioVuelta = metricasReportadas == 0 ? 0.0 : sumaVueltaEstimadaMs / metricasReportadas;
+        double minimo = metricasReportadas == 0 ? 0.0 : minimoRttMs;
+        double maximo = metricasReportadas == 0 ? 0.0 : maximoRttMs;
+        return new String[] {
+                "lecturas=" + lecturasRecibidas,
+                "metricas=" + metricasReportadas,
+                "rttPromMs=" + String.format(Locale.US, "%.4f", promedioRtt),
+                "rttMinMs=" + String.format(Locale.US, "%.4f", minimo),
+                "rttMaxMs=" + String.format(Locale.US, "%.4f", maximo),
+                "redPromMs=" + String.format(Locale.US, "%.4f", promedioRed),
+                "idaPromMs=" + String.format(Locale.US, "%.4f", promedioIda),
+                "vueltaPromMs=" + String.format(Locale.US, "%.4f", promedioVuelta),
+                "procPromMs=" + String.format(Locale.US, "%.4f", promedioProcesamiento)
+        };
+    }
 }

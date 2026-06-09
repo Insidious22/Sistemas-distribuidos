@@ -22,7 +22,8 @@ public class AdministradorRecursosSismicos {
     public AdministradorRecursosSismicos(int permisosConcurrentes) {
         semaforoAdmision = new Semaphore(permisosConcurrentes, true);
         RegistroMetricas.escribir("concurrencia_sismica.log",
-                RegistroMetricas.linea("SEMAFORO_CONFIGURADO", "permisosConcurrentes=" + permisosConcurrentes,
+                RegistroMetricas.evento("CONFIG", "SEMAFORO_INICIALIZADO", "SERVIDOR",
+                        "permisosMax=" + permisosConcurrentes,
                         "fairness=true", "retardoSimuladoMs=" + RETARDO_SIMULADO_MS));
     }
 
@@ -34,8 +35,8 @@ public class AdministradorRecursosSismicos {
             System.out.println("[Control] Estacion " + idEstacion + " esperando permiso del semaforo. Permisos disponibles: "
                     + semaforoAdmision.availablePermits());
             RegistroMetricas.escribir("concurrencia_sismica.log",
-                    RegistroMetricas.linea("COLA_SEMAFORO_ESPERA", "idEstacion=" + idEstacion,
-                            "permisosDisponibles=" + semaforoAdmision.availablePermits(),
+                    RegistroMetricas.evento("SEMAFORO", "ESPERA_COLA", idEstacion,
+                            "dispAntes=" + semaforoAdmision.availablePermits(),
                             "hilo=" + Thread.currentThread().getName()));
 
             semaforoAdmision.acquire();
@@ -48,9 +49,9 @@ public class AdministradorRecursosSismicos {
             System.out.println("[Admision] Permiso concedido a " + idEstacion + ". Espera: "
                     + RegistroMetricas.ms(esperaMs) + " ms");
             RegistroMetricas.escribir("concurrencia_sismica.log",
-                    RegistroMetricas.linea("SEMAFORO_PERMISO_CONCEDIDO", "idEstacion=" + idEstacion,
+                    RegistroMetricas.evento("SEMAFORO", "PERMISO_OTORGADO", idEstacion,
                             "esperaMs=" + RegistroMetricas.ms(esperaMs),
-                            "permisosDisponibles=" + semaforoAdmision.availablePermits(),
+                            "dispDespues=" + semaforoAdmision.availablePermits(),
                             "hilo=" + Thread.currentThread().getName()));
 
             guardarEnBitacora(idEstacion, tramaDatos, timestampProcesamiento);
@@ -58,15 +59,15 @@ public class AdministradorRecursosSismicos {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             RegistroMetricas.escribir("concurrencia_sismica.log",
-                    RegistroMetricas.linea("SEMAFORO_INTERRUPCION", "idEstacion=" + idEstacion,
+                    RegistroMetricas.evento("ERROR", "INTERRUPCION_SEMAFORO", idEstacion,
                             "detalle=" + ex.getMessage()));
         } finally {
             if (permisoAdquirido) {
                 semaforoAdmision.release();
                 System.out.println("[Liberacion] " + idEstacion + " libero el permiso del semaforo.");
                 RegistroMetricas.escribir("concurrencia_sismica.log",
-                        RegistroMetricas.linea("SEMAFORO_PERMISO_LIBERADO", "idEstacion=" + idEstacion,
-                                "permisosDisponibles=" + semaforoAdmision.availablePermits(),
+                        RegistroMetricas.evento("SEMAFORO", "PERMISO_LIBERADO", idEstacion,
+                                "dispDespues=" + semaforoAdmision.availablePermits(),
                                 "hilo=" + Thread.currentThread().getName()));
             }
         }
@@ -74,7 +75,7 @@ public class AdministradorRecursosSismicos {
 
     private synchronized void guardarEnBitacora(String idEstacion, String tramaDatos, long timestampProcesamiento) {
         RegistroMetricas.escribir("concurrencia_sismica.log",
-                RegistroMetricas.linea("REGION_CRITICA_ENTRADA", "idEstacion=" + idEstacion,
+                RegistroMetricas.evento("CRITICA", "ENTRA_BITACORA", idEstacion,
                         "monitor=synchronized", "archivo=" + archivoBitacora.getName(),
                         "hilo=" + Thread.currentThread().getName()));
 
@@ -83,15 +84,15 @@ public class AdministradorRecursosSismicos {
                 PrintWriter out = new PrintWriter(bw)) {
             out.println("TS_SERV:" + timestampProcesamiento + ";" + tramaDatos);
             RegistroMetricas.escribir("concurrencia_sismica.log",
-                    RegistroMetricas.linea("REGION_CRITICA_ESCRITURA_SEGURA", "idEstacion=" + idEstacion,
+                    RegistroMetricas.evento("CRITICA", "ESCRITURA_OK", idEstacion,
                             "archivo=" + archivoBitacora.getName()));
         } catch (IOException ex) {
             RegistroMetricas.escribir("concurrencia_sismica.log",
-                    RegistroMetricas.linea("REGION_CRITICA_ERROR_IO", "idEstacion=" + idEstacion,
+                    RegistroMetricas.evento("ERROR", "ERROR_IO_BITACORA", idEstacion,
                             "error=" + ex.getClass().getSimpleName(), "detalle=" + ex.getMessage()));
         } finally {
             RegistroMetricas.escribir("concurrencia_sismica.log",
-                    RegistroMetricas.linea("REGION_CRITICA_SALIDA", "idEstacion=" + idEstacion,
+                    RegistroMetricas.evento("CRITICA", "SALE_BITACORA", idEstacion,
                             "monitor=synchronized", "hilo=" + Thread.currentThread().getName()));
         }
     }

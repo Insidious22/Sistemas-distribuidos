@@ -22,8 +22,11 @@ El servidor acepta varios clientes permanentes al mismo tiempo y registra metric
 
 ```text
 logs/servidor_tcp_metricas.log
+logs/servidor_tcp_resumen.log
 logs/concurrencia_sismica.log
 ```
+
+Use `servidor_tcp_resumen.log` para leer rapidamente los promedios por cliente.
 
 La bitacora unificada protegida por exclusion mutua queda en:
 

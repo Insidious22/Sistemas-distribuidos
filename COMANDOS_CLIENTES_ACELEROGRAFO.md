@@ -78,6 +78,12 @@ El servidor TCP registra los movimientos de sincronizacion en:
 logs/concurrencia_sismica.log
 ```
 
+Para leer promedios por cliente sin payloads largos:
+
+```text
+logs/servidor_tcp_resumen.log
+```
+
 Tambien guarda las lecturas en una bitacora protegida por `synchronized`:
 
 ```text
@@ -86,11 +92,11 @@ bitacora_sismica.txt
 
 Eventos importantes:
 
-- `COLA_SEMAFORO_ESPERA`: el hilo llego y espera permiso.
-- `SEMAFORO_PERMISO_CONCEDIDO`: entro a uno de los 3 espacios concurrentes.
-- `REGION_CRITICA_ENTRADA`: intenta escribir en la bitacora compartida.
-- `REGION_CRITICA_ESCRITURA_SEGURA`: escritura protegida completada.
-- `SEMAFORO_PERMISO_LIBERADO`: libera el permiso para otro cliente.
+- `[SEMAFORO] | ESPERA_COLA`: el hilo llego y espera permiso.
+- `[SEMAFORO] | PERMISO_OTORGADO`: entro a uno de los espacios concurrentes.
+- `[CRITICA] | ENTRA_BITACORA`: intenta escribir en la bitacora compartida.
+- `[CRITICA] | ESCRITURA_OK`: escritura protegida completada.
+- `[SEMAFORO] | PERMISO_LIBERADO`: libera el permiso para otro cliente.
 
 ## Logs generados
 

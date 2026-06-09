@@ -207,6 +207,7 @@ Logs:
 
 - `logs/servidor_tcp_metricas.log`: lecturas recibidas por el servidor TCP y tiempo de procesamiento local.
 - `logs/servidor_tcp_metricas.log`: tambien guarda `rttPromedioMs`, `rttMinMs` y `rttMaxMs` por cliente TCP.
+- `logs/servidor_tcp_resumen.log`: resumen legible por cliente con RTT actual, promedio, minimo y maximo.
 - `logs/concurrencia_sismica.log`: movimientos del semaforo, espera en cola, entrada/salida de region critica y escritura segura.
 - `logs/cliente_tcp_metricas.log`: tiempo `T_TX` medido por el cliente TCP desde envio hasta ACK.
 - `logs/servidor_rmi_metricas.log`: invocaciones recibidas por el servidor RMI y tiempo de procesamiento local.
@@ -228,12 +229,12 @@ Implementacion:
 
 Eventos registrados en `logs/concurrencia_sismica.log`:
 
-- `COLA_SEMAFORO_ESPERA`
-- `SEMAFORO_PERMISO_CONCEDIDO`
-- `REGION_CRITICA_ENTRADA`
-- `REGION_CRITICA_ESCRITURA_SEGURA`
-- `REGION_CRITICA_SALIDA`
-- `SEMAFORO_PERMISO_LIBERADO`
+- `[SEMAFORO] | ESPERA_COLA`
+- `[SEMAFORO] | PERMISO_OTORGADO`
+- `[CRITICA] | ENTRA_BITACORA`
+- `[CRITICA] | ESCRITURA_OK`
+- `[CRITICA] | SALE_BITACORA`
+- `[SEMAFORO] | PERMISO_LIBERADO`
 
 ## Conceptos base para entender la practica
 

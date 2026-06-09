@@ -38,6 +38,7 @@ javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullNam
 Los modulos de acelerografo crean automaticamente la carpeta `logs/`.
 
 Servidor TCP: `logs/servidor_tcp_metricas.log`
+Resumen TCP: `logs/servidor_tcp_resumen.log`
 Cliente TCP: `logs/cliente_tcp_metricas.log`
 Concurrencia TCP: `logs/concurrencia_sismica.log`
 Servidor RMI: `logs/servidor_rmi_metricas.log`

@@ -1,7 +1,9 @@
 package socket.conconexion.acelerografo;
 
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import telemetria.RegistroMetricas;
 
 public class ServidorAcelTCP {
     private static final int PUERTO_DEFECTO = 7500;
@@ -17,11 +19,26 @@ public class ServidorAcelTCP {
             System.out.println("Semaforo de admision configurado con " + permisosConcurrentes + " permiso(s).");
             System.out.println("Informe a los clientes la IP LAN de esta maquina. Use Ctrl + C para detener.");
 
-            while (true) {
-                Socket socketCliente = servidor.accept();
-                System.out.println("Conexion TCP aceptada desde " + socketCliente.getRemoteSocketAddress());
-                Thread hilo = new Thread(new HiloDespachador(socketCliente), "hilo-acel-" + socketCliente.getPort());
-                hilo.start();
+            while (!servidor.isClosed()) {
+                try {
+                    Socket socketCliente = servidor.accept();
+                    System.out.println("Conexion TCP aceptada desde " + socketCliente.getRemoteSocketAddress());
+                    Thread hilo = new Thread(new HiloDespachador(socketCliente), "hilo-acel-" + socketCliente.getPort());
+                    hilo.setUncaughtExceptionHandler((thread, error) -> {
+                        RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                                RegistroMetricas.linea("TCP_HILO_ERROR_NO_CONTROLADO", "hilo=" + thread.getName(),
+                                        "error=" + error.getClass().getSimpleName(),
+                                        "detalle=" + error.getMessage()));
+                        System.out.println("Un hilo de cliente fallo, pero el servidor sigue activo: "
+                                + thread.getName());
+                    });
+                    hilo.start();
+                } catch (IOException ex) {
+                    RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                            RegistroMetricas.linea("TCP_ACCEPT_ERROR", "error=" + ex.getClass().getSimpleName(),
+                                    "detalle=" + ex.getMessage()));
+                    System.out.println("No se pudo aceptar una conexion. El servidor seguira escuchando.");
+                }
             }
         } catch (Exception ex) {
             ex.printStackTrace();

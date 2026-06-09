@@ -1,10 +1,12 @@
 package socket.conconexion.acelerografo;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HashMap;
@@ -29,7 +31,8 @@ public class HiloDespachador implements Runnable {
     @Override
     public void run() {
         String idSesion = "SIN_IDENTIFICAR-" + socket.getPort();
-        EstadisticasCliente estadisticas = new EstadisticasCliente(idSesion, String.valueOf(socket.getRemoteSocketAddress()));
+        String clienteRemoto = direccionRemota();
+        EstadisticasCliente estadisticas = new EstadisticasCliente(idSesion, clienteRemoto);
 
         try (Socket cliente = socket;
                 BufferedReader entrada = new BufferedReader(
@@ -38,7 +41,7 @@ public class HiloDespachador implements Runnable {
                         new OutputStreamWriter(cliente.getOutputStream(), StandardCharsets.UTF_8), true)) {
 
             RegistroMetricas.escribir("servidor_tcp_metricas.log",
-                    RegistroMetricas.linea("TCP_CONEXION_ABIERTA", "cliente=" + cliente.getRemoteSocketAddress()));
+                    RegistroMetricas.linea("TCP_CONEXION_ABIERTA", "cliente=" + direccionRemota(cliente)));
 
             String linea;
             while ((linea = entrada.readLine()) != null) {
@@ -49,14 +52,16 @@ public class HiloDespachador implements Runnable {
 
                 if (linea.startsWith("HELLO;")) {
                     idSesion = extraerCampo(linea, "ID_ACEL", idSesion);
+                    clienteRemoto = direccionRemota(cliente);
+                    final String remotoIdentificado = clienteRemoto;
                     estadisticas = CLIENTES.computeIfAbsent(idSesion,
-                            id -> new EstadisticasCliente(id, String.valueOf(cliente.getRemoteSocketAddress())));
+                            id -> new EstadisticasCliente(id, remotoIdentificado));
                     salida.println("ACK_HELLO:" + idSesion + ";RECIBIDO:" + Instant.now());
                     System.out.println("Cliente TCP conectado permanentemente: " + idSesion + " desde "
-                            + cliente.getRemoteSocketAddress());
+                            + clienteRemoto);
                     RegistroMetricas.escribir("servidor_tcp_metricas.log",
                             RegistroMetricas.linea("TCP_CLIENTE_CONECTADO", "idAcel=" + idSesion,
-                                    "cliente=" + cliente.getRemoteSocketAddress()));
+                                    "cliente=" + clienteRemoto));
                     continue;
                 }
 
@@ -67,7 +72,7 @@ public class HiloDespachador implements Runnable {
                     double idaEstimadaMs = Double.parseDouble(extraerCampo(linea, "IDA_ESTIMADA_MS", "0"));
                     double vueltaEstimadaMs = Double.parseDouble(extraerCampo(linea, "VUELTA_ESTIMADA_MS", "0"));
                     estadisticas = CLIENTES.computeIfAbsent(idAcel,
-                            id -> new EstadisticasCliente(id, String.valueOf(cliente.getRemoteSocketAddress())));
+                            id -> new EstadisticasCliente(id, direccionRemota(cliente)));
                     estadisticas.registrarMetricaCliente(rttMs, redEstimadaMs, idaEstimadaMs, vueltaEstimadaMs);
                     RegistroMetricas.escribir("servidor_tcp_metricas.log",
                             RegistroMetricas.linea("TCP_RTT_REPORTADO_POR_CLIENTE", "idAcel=" + idAcel,
@@ -76,21 +81,43 @@ public class HiloDespachador implements Runnable {
                                     "idaEstimadaMs=" + RegistroMetricas.ms(idaEstimadaMs),
                                     "vueltaEstimadaMs=" + RegistroMetricas.ms(vueltaEstimadaMs),
                                     estadisticas.resumen()));
+                    RegistroMetricas.escribir("servidor_tcp_resumen.log",
+                            RegistroMetricas.evento("METRICA", "PROMEDIO_CLIENTE", idAcel,
+                                    unirCampos("seq=" + extraerCampo(linea, "SEQ", "-"),
+                                            "rttActualMs=" + RegistroMetricas.ms(rttMs),
+                                            estadisticas.resumenCampos())));
                     continue;
                 }
 
                 procesarLectura(cliente, salida, linea, estadisticas);
             }
-        } catch (Exception ex) {
-            System.out.println("No se pudo procesar una lectura TCP.");
+            System.out.println("Cliente desconectado: " + idSesion + " desde " + clienteRemoto);
             RegistroMetricas.escribir("servidor_tcp_metricas.log",
-                    RegistroMetricas.linea("TCP_SERVIDOR_ERROR", "cliente=" + socket.getRemoteSocketAddress(),
+                    RegistroMetricas.linea("TCP_CLIENTE_DESCONECTADO", "idAcel=" + idSesion,
+                            "cliente=" + clienteRemoto, "modo=FIN_DE_STREAM"));
+        } catch (SocketException ex) {
+            System.out.println("Cliente desconectado abruptamente: " + idSesion + " desde " + clienteRemoto);
+            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                    RegistroMetricas.linea("TCP_CLIENTE_DESCONECTADO", "idAcel=" + idSesion,
+                            "cliente=" + clienteRemoto, "modo=ABRUPTO",
+                            "detalle=" + ex.getMessage()));
+        } catch (IOException ex) {
+            System.out.println("Error de E/S con cliente " + idSesion + ". El servidor sigue activo.");
+            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                    RegistroMetricas.linea("TCP_CLIENTE_IO_ERROR", "idAcel=" + idSesion,
+                            "cliente=" + clienteRemoto, "error=" + ex.getClass().getSimpleName(),
+                            "detalle=" + ex.getMessage()));
+        } catch (Exception ex) {
+            System.out.println("No se pudo procesar una lectura TCP de " + idSesion + ". El servidor sigue activo.");
+            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                    RegistroMetricas.linea("TCP_SERVIDOR_ERROR", "idAcel=" + idSesion,
+                            "cliente=" + clienteRemoto,
                             "error=" + ex.getClass().getSimpleName(), "detalle=" + ex.getMessage()));
             ex.printStackTrace();
         } finally {
             RegistroMetricas.escribir("servidor_tcp_metricas.log",
                     RegistroMetricas.linea("TCP_CONEXION_CERRADA", "idAcel=" + idSesion,
-                            "cliente=" + socket.getRemoteSocketAddress(), estadisticas.resumen()));
+                            "cliente=" + clienteRemoto, estadisticas.resumen()));
         }
     }
 
@@ -106,13 +133,13 @@ public class HiloDespachador implements Runnable {
         Instant servidorAck = Instant.now();
 
         estadisticas.registrarLectura(procesamientoMs);
-        System.out.println("TCP recibido desde " + cliente.getRemoteSocketAddress() + " -> " + lectura + " SEQ=" + seq);
+        System.out.println("TCP recibido desde " + direccionRemota(cliente) + " -> " + lectura + " SEQ=" + seq);
         salida.println("ACK_TCP;ID_ACEL:" + lectura.getIdAcel() + ";SEQ:" + seq + ";SERVIDOR_RECIBIDO:"
                 + servidorRecibido + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:"
                 + RegistroMetricas.ms(procesamientoMs));
         RegistroMetricas.escribir("servidor_tcp_metricas.log",
                 RegistroMetricas.linea("TCP_LECTURA_RECIBIDA", "idAcel=" + lectura.getIdAcel(), "seq=" + seq,
-                        "cliente=" + cliente.getRemoteSocketAddress(), "servidorRecibido=" + servidorRecibido,
+                        "cliente=" + direccionRemota(cliente), "servidorRecibido=" + servidorRecibido,
                         "servidorAck=" + servidorAck,
                         "procesamientoMs=" + RegistroMetricas.ms(procesamientoMs), "payload=" + payload,
                         estadisticas.resumen()));
@@ -135,5 +162,25 @@ public class HiloDespachador implements Runnable {
             recursosSismicos = new AdministradorRecursosSismicos();
         }
         return recursosSismicos;
+    }
+
+    private static String[] unirCampos(String campo1, String campo2, String[] otrosCampos) {
+        String[] campos = new String[otrosCampos.length + 2];
+        campos[0] = campo1;
+        campos[1] = campo2;
+        System.arraycopy(otrosCampos, 0, campos, 2, otrosCampos.length);
+        return campos;
+    }
+
+    private String direccionRemota() {
+        return direccionRemota(socket);
+    }
+
+    private static String direccionRemota(Socket cliente) {
+        try {
+            return String.valueOf(cliente.getRemoteSocketAddress());
+        } catch (Exception ex) {
+            return "desconocido";
+        }
     }
 }
