@@ -15,11 +15,13 @@ import telemetria.RegistroMetricas;
 public class EstacionAcelTCP {
     private static final int PUERTO_DEFECTO = 7500;
     private static final long INTERVALO_DEFECTO_MS = 60000L;
+    private static final long INTERVALO_INTERACTIVO_MS = 1000L;
     private static final String ID_ACEL_DEFECTO = "EC-UCON01";
     private static final int REPETICIONES_PERMANENTE = 0;
 
     public static void main(String[] args) {
         try {
+            boolean modoInteractivo = args.length == 0;
             String hostServidor = args.length >= 1 ? args[0] : leerTexto("IP del servidor TCP", "");
             if (hostServidor.trim().isEmpty()) {
                 imprimirUso();
@@ -30,13 +32,11 @@ public class EstacionAcelTCP {
             String idAcel = args.length >= 3 ? args[2] : leerTexto("ID del acelerografo", ID_ACEL_DEFECTO);
             long intervaloMs = args.length >= 4
                     ? Long.parseLong(args[3])
-                    : leerEntero("Intervalo entre envios en ms", (int) INTERVALO_DEFECTO_MS);
-            int repeticiones = args.length >= 5
-                    ? Integer.parseInt(args[4])
-                    : leerEntero("Cantidad de envios, 0 = permanente", REPETICIONES_PERMANENTE);
-            int duracionSegundos = args.length >= 6
-                    ? Integer.parseInt(args[5])
-                    : leerEntero("Duracion en segundos, 0 = sin limite", 0);
+                    : leerEntero("Intervalo entre envios en ms", modoInteractivo
+                            ? (int) INTERVALO_INTERACTIVO_MS
+                            : (int) INTERVALO_DEFECTO_MS);
+            int repeticiones = args.length >= 5 ? Integer.parseInt(args[4]) : REPETICIONES_PERMANENTE;
+            int duracionSegundos = args.length >= 6 ? Integer.parseInt(args[5]) : 0;
             long finNs = duracionSegundos > 0
                     ? System.nanoTime() + duracionSegundos * 1_000_000_000L
                     : Long.MAX_VALUE;
@@ -50,6 +50,9 @@ public class EstacionAcelTCP {
                 salida.println("HELLO;ID_ACEL:" + idAcel);
                 System.out.println("Servidor: " + entrada.readLine());
                 System.out.println("Cliente TCP permanente conectado. Use Ctrl + C para detener.");
+                if (repeticiones != REPETICIONES_PERMANENTE || duracionSegundos > 0) {
+                    System.out.println("Modo finito: el cliente cerrara al completar la cantidad o duracion indicada.");
+                }
 
                 int indice = 0;
                 while ((repeticiones == REPETICIONES_PERMANENTE || indice < repeticiones)
@@ -128,6 +131,7 @@ public class EstacionAcelTCP {
 
     private static void imprimirUso() {
         System.out.println("Uso: java -cp out socket.conconexion.acelerografo.EstacionAcelTCP <ipServidor> [puerto] [idAcel] [intervaloMs] [repeticiones] [duracionSegundos]");
+        System.out.println("Sin argumentos, el cliente pide datos basicos y queda permanente hasta Ctrl + C.");
     }
 
     private static String leerTexto(String mensaje, String valorDefecto) throws Exception {

@@ -34,3 +34,9 @@ java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23 7500 
 ```
 
 El ejemplo envia una rafaga de 1 mensaje cada segundo durante 60 segundos.
+
+Para cliente permanente:
+
+```powershell
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23 7500 EC-UCON02 1000 0 0
+```

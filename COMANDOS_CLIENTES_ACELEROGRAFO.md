@@ -28,6 +28,12 @@ Cambiar `EC-UCON02` por el ID asignado a cada estacion. El ultimo parametro `0` 
 java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23 7500 EC-UCON02 60000 0
 ```
 
+Si lo ejecutan sin argumentos, el cliente solo pide IP, puerto, ID e intervalo. Despues queda permanente y no se cierra solo:
+
+```powershell
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP
+```
+
 Para una rafaga de 1 mensaje por segundo durante 60 segundos:
 
 ```powershell
@@ -41,6 +47,8 @@ Parametros del cliente TCP:
 ```
 
 Ejemplo: `1000 0 60` significa intervalo de 1000 ms, sin limite por cantidad fija, detenerse despues de 60 segundos.
+
+Para que no se cierre, use `0` en repeticiones y `0` en duracion, o ejecute sin argumentos y detengalo manualmente con `Ctrl + C`.
 
 ## 5. Cliente RMI
 
