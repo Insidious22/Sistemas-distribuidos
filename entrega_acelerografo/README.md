@@ -13,7 +13,7 @@ Cada parte se compila por separado desde su propia carpeta.
 
 ```powershell
 cd "C:\Users\Programación\Documents\Sistemas-distribuidos\entrega_acelerografo\servidor"
-javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
+javac --release 8 -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
 java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500
 ```
 
@@ -29,7 +29,7 @@ Cambie `192.16.108.23` por la IP real del servidor y `EC-UCON02` por el ID de la
 
 ```powershell
 cd "C:\Users\Programación\Documents\Sistemas-distribuidos\entrega_acelerografo\cliente"
-javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
+javac --release 8 -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
 java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23 7500 EC-UCON02 1000 0 60
 ```
 

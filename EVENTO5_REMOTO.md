@@ -7,7 +7,7 @@ Este escenario usa TCP. Tu computadora actua como servidor y tu companero ejecut
 Desde esta carpeta del proyecto:
 
 ```powershell
-javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
+javac --release 8 -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
 ```
 
 ## Prueba local primero

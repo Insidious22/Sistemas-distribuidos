@@ -32,7 +32,7 @@ respaldo_original/   material original, duplicados, ZIP/RAR y PDF de apoyo
 Compilacion general desde PowerShell:
 
 ```powershell
-javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
+javac --release 8 -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
 ```
 
 Ejecucion general:

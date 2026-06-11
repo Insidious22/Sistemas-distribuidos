@@ -30,7 +30,7 @@ Esta carpeta ya quedo ordenada para trabajar como proyecto JavaSE y probar desde
 Desde PowerShell, ubicado en esta carpeta:
 
 ```powershell
-javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
+javac --release 8 -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
 ```
 
 ## Logs de metricas

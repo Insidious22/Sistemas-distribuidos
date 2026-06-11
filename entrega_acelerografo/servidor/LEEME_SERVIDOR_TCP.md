@@ -3,7 +3,7 @@
 ## Compilar
 
 ```powershell
-javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
+javac --release 8 -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
 ```
 
 ## Levantar servidor

@@ -11,7 +11,7 @@ cd "C:\ruta\donde\descargaron\Sistemas-distribuidos"
 ## 2. Compilar
 
 ```powershell
-javac -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
+javac --release 8 -encoding UTF-8 -d out (Get-ChildItem -Recurse src -Filter *.java).FullName
 ```
 
 ## 3. Probar conectividad con el servidor
