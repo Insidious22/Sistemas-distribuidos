@@ -27,6 +27,7 @@ public class EstacionAcelTCP {
     private static final int REPETICIONES_PERMANENTE = 0;
     private static final int TIMEOUT_CONEXION_MS = 2000;
     private static final int TIMEOUT_ACK_MS = 5000;
+    private static final int TIMEOUT_MONITOR_MS = 400;
     private static final int PAUSA_REELECCION_MS = 1000;
     private static final long REVISION_PRIORIDAD_MS = 5000L;
 
@@ -67,6 +68,9 @@ public class EstacionAcelTCP {
                         pendientes.add(lectura);
                         indice++;
                         registrarLecturaEncolada(lectura, "SIN_COORDINADOR", pendientes.size());
+                        publicarMonitorGlobal(servidores, idAcel, "COLA_LOCAL_ENCOLADO", lectura.secuencia,
+                                coordinador, "motivo=SIN_COORDINADOR", "pendientes=" + pendientes.size(),
+                                "origen=COLA_LOCAL", "detalle=lectura_guardada_sin_servidores");
                         System.out.println("Sin coordinador. Lectura " + lectura.secuencia
                                 + " guardada en cola local. Pendientes=" + pendientes.size());
                         esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
@@ -92,12 +96,15 @@ public class EstacionAcelTCP {
                         LecturaPendiente lectura = sincronizandoPendiente
                                 ? pendientes.peek()
                                 : crearLecturaPendiente(idAcel, indice);
-                        boolean enviado = enviarLectura(conexion, coordinador, idAcel, lectura);
+                        boolean enviado = enviarLectura(conexion, coordinador, idAcel, lectura, servidores);
                         if (!enviado) {
                             if (!sincronizandoPendiente) {
                                 pendientes.add(lectura);
                                 indice++;
                                 registrarLecturaEncolada(lectura, "FALLO_ENVIO", pendientes.size());
+                                publicarMonitorGlobal(servidores, idAcel, "COLA_LOCAL_ENCOLADO", lectura.secuencia,
+                                        coordinador, "motivo=FALLO_ENVIO", "pendientes=" + pendientes.size(),
+                                        "origen=COLA_LOCAL", "detalle=lectura_guardada_por_fallo_envio");
                             }
                             coordinador = elegirCoordinador(servidores, idAcel, "FALLO_ENVIO", indice + 1);
                             break;
@@ -105,6 +112,9 @@ public class EstacionAcelTCP {
                         if (sincronizandoPendiente) {
                             pendientes.remove();
                             registrarLecturaSincronizada(lectura, coordinador, pendientes.size());
+                            publicarMonitorGlobal(servidores, idAcel, "COLA_LOCAL_SINCRONIZADO",
+                                    lectura.secuencia, coordinador, "pendientes=" + pendientes.size(),
+                                    "origen=COLA_LOCAL", "detalle=lectura_pendiente_enviada_al_coordinador");
                         } else {
                             indice++;
                         }
@@ -114,6 +124,10 @@ public class EstacionAcelTCP {
                             proximaRevisionPrioridadNs = siguienteRevisionPrioridadNs();
                             if (debeMigrarPorPrioridad(coordinador, preferente)) {
                                 registrarMigracionPorRecuperacion(coordinador, preferente, idAcel, indice);
+                                publicarMonitorGlobal(servidores, idAcel, "MIGRACION_COORDINADOR", indice,
+                                        preferente, "motivo=RECUPERACION_MAYOR_PRIORIDAD",
+                                        "detalle=de_" + coordinador.idEfectivo() + "_a_"
+                                                + preferente.idEfectivo());
                                 coordinador = preferente;
                                 break;
                             }
@@ -163,7 +177,7 @@ public class EstacionAcelTCP {
     }
 
     private static boolean enviarLectura(ConexionServidor conexion, NodoServidor servidor, String idAcel,
-            LecturaPendiente lectura) {
+            LecturaPendiente lectura, List<NodoServidor> servidores) {
         try {
             Instant clienteEnvio = Instant.now();
             long tiempoInicial = System.nanoTime();
@@ -210,6 +224,11 @@ public class EstacionAcelTCP {
                                     + extraerCampo(ack, "SERVIDOR_RECIBIDO", "-"),
                             "servidorAck=" + extraerCampo(ack, "SERVIDOR_ACK", "-"),
                             "clienteAck=" + clienteAck, "ack=" + ack, "payload=" + lectura.payload));
+            publicarMonitorGlobal(servidores, idAcel, "LECTURA_ENVIADA", lectura.secuencia, servidor,
+                    "rttMs=" + RegistroMetricas.ms(tTxMs),
+                    "redMs=" + RegistroMetricas.ms(redEstimadaMs),
+                    "origen=" + lectura.origen,
+                    "detalle=ack_recibido");
             return true;
         } catch (Exception ex) {
             registrarFalloCoordinador(servidor, idAcel, "ENVIO", lectura.secuencia, ex);
@@ -271,6 +290,9 @@ public class EstacionAcelTCP {
         } else {
             System.out.println("Eleccion sin ganador: ningun servidor respondio.");
         }
+        publicarMonitorGlobal(servidores, idAcel, "ELECCION_COORDINADOR", secuencia, ganador,
+                "motivo=" + motivo,
+                "detalle=" + (ganador == null ? "sin_ganador" : "ganador_" + ganador.idEfectivo()));
         return ganador;
     }
 
@@ -342,6 +364,86 @@ public class EstacionAcelTCP {
 
     private static long siguienteRevisionPrioridadNs() {
         return System.nanoTime() + REVISION_PRIORIDAD_MS * 1_000_000L;
+    }
+
+    private static void publicarMonitorGlobal(List<NodoServidor> servidores, String idAcel, String evento,
+            int secuencia, NodoServidor coordinador, String... campos) {
+        if (servidores == null || servidores.isEmpty()) {
+            return;
+        }
+
+        StringBuilder mensaje = new StringBuilder();
+        mensaje.append("LOG_CLIENTE;ID_ACEL:").append(idAcel);
+        mensaje.append(";EVENTO:").append(evento);
+        mensaje.append(";SEQ:").append(secuencia);
+        mensaje.append(";COORDINADOR:").append(coordinador == null ? "-" : coordinador.etiqueta());
+        mensaje.append(";ID_SERV:").append(coordinador == null ? "-" : coordinador.idEfectivo());
+        mensaje.append(";PRIORIDAD:").append(coordinador == null ? "-" : coordinador.prioridadEfectiva());
+        mensaje.append(";CLIENTE_TS:").append(Instant.now());
+        for (String campo : campos) {
+            agregarCampoMonitor(mensaje, campo);
+        }
+
+        for (NodoServidor servidor : servidores) {
+            enviarMonitorAServidor(servidor, mensaje.toString());
+        }
+    }
+
+    private static void enviarMonitorAServidor(NodoServidor servidor, String mensaje) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(servidor.host, servidor.puerto), TIMEOUT_MONITOR_MS);
+            socket.setSoTimeout(TIMEOUT_MONITOR_MS);
+            BufferedReader entrada = new BufferedReader(
+                    new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            PrintWriter salida = new PrintWriter(
+                    new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+            salida.println(mensaje);
+            entrada.readLine();
+        } catch (Exception ex) {
+            // El monitor global es de mejor esfuerzo: si un servidor esta caido,
+            // recibira nuevos eventos cuando vuelva a estar disponible.
+        }
+    }
+
+    private static void agregarCampoMonitor(StringBuilder mensaje, String campo) {
+        if (campo == null || campo.trim().isEmpty()) {
+            return;
+        }
+        int separador = campo.indexOf('=');
+        if (separador <= 0) {
+            mensaje.append(";DETALLE:").append(limpiarValorMonitor(campo));
+            return;
+        }
+        String clave = claveMonitor(campo.substring(0, separador));
+        String valor = limpiarValorMonitor(campo.substring(separador + 1));
+        mensaje.append(';').append(clave).append(':').append(valor);
+    }
+
+    private static String claveMonitor(String clave) {
+        String normalizada = clave.trim();
+        if ("rttMs".equalsIgnoreCase(normalizada)) {
+            return "RTT_MS";
+        }
+        if ("redMs".equalsIgnoreCase(normalizada)) {
+            return "RED_MS";
+        }
+        if ("pendientes".equalsIgnoreCase(normalizada)) {
+            return "PENDIENTES";
+        }
+        if ("motivo".equalsIgnoreCase(normalizada)) {
+            return "MOTIVO";
+        }
+        if ("origen".equalsIgnoreCase(normalizada)) {
+            return "ORIGEN";
+        }
+        if ("detalle".equalsIgnoreCase(normalizada)) {
+            return "DETALLE";
+        }
+        return normalizada.toUpperCase(Locale.US);
+    }
+
+    private static String limpiarValorMonitor(String valor) {
+        return valor == null ? "" : valor.replace(';', ',').replace('|', '/');
     }
 
     private static List<NodoServidor> parsearServidores(String texto, int puertoDefecto) {

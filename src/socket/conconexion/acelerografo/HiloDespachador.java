@@ -76,6 +76,11 @@ public class HiloDespachador implements Runnable {
                     continue;
                 }
 
+                if (linea.startsWith("LOG_CLIENTE;")) {
+                    procesarLogCliente(linea, direccionRemota(cliente), salida);
+                    continue;
+                }
+
                 if (linea.startsWith("HELLO;")) {
                     idSesion = extraerCampo(linea, "ID_ACEL", idSesion);
                     clienteRemoto = direccionRemota(cliente);
@@ -171,6 +176,28 @@ public class HiloDespachador implements Runnable {
                         "servidorAck=" + servidorAck,
                         "procesamientoMs=" + RegistroMetricas.ms(procesamientoMs), "payload=" + payload,
                         estadisticas.resumen()));
+    }
+
+    private static void procesarLogCliente(String linea, String clienteRemoto, PrintWriter salida) {
+        String idAcel = extraerCampo(linea, "ID_ACEL", "SIN_ID");
+        String evento = extraerCampo(linea, "EVENTO", "SIN_EVENTO");
+        String seq = extraerCampo(linea, "SEQ", "-");
+        RegistroMetricas.escribir("monitor_global_clientes.log",
+                RegistroMetricas.linea("MONITOR_CLIENTE", "idAcel=" + idAcel,
+                        "eventoCliente=" + evento,
+                        "seq=" + seq,
+                        "clienteRemoto=" + clienteRemoto,
+                        "coordinador=" + extraerCampo(linea, "COORDINADOR", "-"),
+                        "idServidor=" + extraerCampo(linea, "ID_SERV", "-"),
+                        "prioridad=" + extraerCampo(linea, "PRIORIDAD", "-"),
+                        "motivo=" + extraerCampo(linea, "MOTIVO", "-"),
+                        "rttMs=" + extraerCampo(linea, "RTT_MS", "-"),
+                        "redMs=" + extraerCampo(linea, "RED_MS", "-"),
+                        "pendientes=" + extraerCampo(linea, "PENDIENTES", "-"),
+                        "origen=" + extraerCampo(linea, "ORIGEN", "-"),
+                        "detalle=" + extraerCampo(linea, "DETALLE", "-"),
+                        "clienteTs=" + extraerCampo(linea, "CLIENTE_TS", "-")));
+        salida.println("ACK_LOG;ID_ACEL:" + idAcel + ";EVENTO:" + evento + ";RECIBIDO:" + Instant.now());
     }
 
     private static String extraerCampo(String linea, String campo, String defecto) {
