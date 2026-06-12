@@ -17,6 +17,9 @@ import telemetria.RegistroMetricas;
 public class HiloDespachador implements Runnable {
     private static final ConcurrentHashMap<String, EstadisticasCliente> CLIENTES = new ConcurrentHashMap<String, EstadisticasCliente>();
     private static AdministradorRecursosSismicos recursosSismicos;
+    private static String idServidor = "SERVIDOR-ACEL";
+    private static int prioridadServidor = 1;
+    private static int puertoServidor = 7500;
 
     private final Socket socket;
 
@@ -26,6 +29,15 @@ public class HiloDespachador implements Runnable {
 
     public static void configurarAdministradorRecursos(AdministradorRecursosSismicos administrador) {
         recursosSismicos = administrador;
+    }
+
+    public static void configurarNodoServidor(String idNodo, int prioridad, int puerto) {
+        idServidor = idNodo;
+        prioridadServidor = prioridad;
+        puertoServidor = puerto;
+        RegistroMetricas.escribir("servidor_eleccion.log",
+                RegistroMetricas.linea("NODO_SERVIDOR_CONFIGURADO", "idServidor=" + idServidor,
+                        "prioridad=" + prioridadServidor, "puerto=" + puertoServidor));
     }
 
     @Override
@@ -50,18 +62,34 @@ public class HiloDespachador implements Runnable {
                     continue;
                 }
 
+                if (linea.startsWith("ELECCION_PING;")) {
+                    String idAcel = extraerCampo(linea, "ID_ACEL", idSesion);
+                    String ronda = extraerCampo(linea, "RONDA", "-");
+                    salida.println("ELECCION_ACK;ID_SERV:" + idServidor + ";PRIORIDAD:" + prioridadServidor
+                            + ";PUERTO:" + puertoServidor + ";ESTADO:VIVO;RONDA:" + ronda + ";RECIBIDO:"
+                            + Instant.now());
+                    RegistroMetricas.escribir("servidor_eleccion.log",
+                            RegistroMetricas.linea("ELECCION_PING_RECIBIDO", "idAcel=" + idAcel,
+                                    "ronda=" + ronda, "cliente=" + direccionRemota(cliente),
+                                    "respuesta=VIVO", "idServidor=" + idServidor,
+                                    "prioridad=" + prioridadServidor));
+                    continue;
+                }
+
                 if (linea.startsWith("HELLO;")) {
                     idSesion = extraerCampo(linea, "ID_ACEL", idSesion);
                     clienteRemoto = direccionRemota(cliente);
                     final String remotoIdentificado = clienteRemoto;
                     estadisticas = CLIENTES.computeIfAbsent(idSesion,
                             id -> new EstadisticasCliente(id, remotoIdentificado));
-                    salida.println("ACK_HELLO:" + idSesion + ";RECIBIDO:" + Instant.now());
+                    salida.println("ACK_HELLO:" + idSesion + ";ID_SERV:" + idServidor + ";PRIORIDAD:"
+                            + prioridadServidor + ";RECIBIDO:" + Instant.now());
                     System.out.println("Cliente TCP conectado permanentemente: " + idSesion + " desde "
                             + clienteRemoto);
                     RegistroMetricas.escribir("servidor_tcp_metricas.log",
                             RegistroMetricas.linea("TCP_CLIENTE_CONECTADO", "idAcel=" + idSesion,
-                                    "cliente=" + clienteRemoto));
+                                    "cliente=" + clienteRemoto, "idServidor=" + idServidor,
+                                    "prioridad=" + prioridadServidor));
                     continue;
                 }
 
