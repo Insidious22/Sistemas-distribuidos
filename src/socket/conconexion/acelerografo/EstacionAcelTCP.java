@@ -11,6 +11,7 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -27,6 +28,7 @@ public class EstacionAcelTCP {
     private static final int TIMEOUT_CONEXION_MS = 2000;
     private static final int TIMEOUT_ACK_MS = 5000;
     private static final int PAUSA_REELECCION_MS = 1000;
+    private static final long REVISION_PRIORIDAD_MS = 5000L;
 
     public static void main(String[] args) {
         try {
@@ -54,14 +56,27 @@ public class EstacionAcelTCP {
 
             List<NodoServidor> servidores = parsearServidores(servidoresTexto, puerto);
             NodoServidor coordinador = elegirCoordinador(servidores, idAcel, "INICIO", 0);
+            long proximaRevisionPrioridadNs = siguienteRevisionPrioridadNs();
+            ArrayDeque<LecturaPendiente> pendientes = new ArrayDeque<LecturaPendiente>();
 
             int indice = 0;
-            while ((repeticiones == REPETICIONES_PERMANENTE || indice < repeticiones)
-                    && System.nanoTime() < finNs) {
+            while (puedeGenerar(indice, repeticiones, finNs) || !pendientes.isEmpty()) {
                 if (coordinador == null) {
-                    System.out.println("No hay servidor disponible. Reintentando eleccion...");
-                    dormir(PAUSA_REELECCION_MS);
+                    if (puedeGenerar(indice, repeticiones, finNs)) {
+                        LecturaPendiente lectura = crearLecturaPendiente(idAcel, indice);
+                        pendientes.add(lectura);
+                        indice++;
+                        registrarLecturaEncolada(lectura, "SIN_COORDINADOR", pendientes.size());
+                        System.out.println("Sin coordinador. Lectura " + lectura.secuencia
+                                + " guardada en cola local. Pendientes=" + pendientes.size());
+                        esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
+                    } else {
+                        System.out.println("No hay servidor disponible. Pendientes por sincronizar="
+                                + pendientes.size());
+                        dormir(PAUSA_REELECCION_MS);
+                    }
                     coordinador = elegirCoordinador(servidores, idAcel, "SIN_COORDINADOR", indice + 1);
+                    proximaRevisionPrioridadNs = siguienteRevisionPrioridadNs();
                     continue;
                 }
 
@@ -72,19 +87,45 @@ public class EstacionAcelTCP {
                         System.out.println("Modo finito: el cliente cerrara al completar la cantidad o duracion indicada.");
                     }
 
-                    while ((repeticiones == REPETICIONES_PERMANENTE || indice < repeticiones)
-                            && System.nanoTime() < finNs) {
-                        boolean enviado = enviarLectura(conexion, coordinador, idAcel, indice);
+                    while (puedeGenerar(indice, repeticiones, finNs) || !pendientes.isEmpty()) {
+                        boolean sincronizandoPendiente = !pendientes.isEmpty();
+                        LecturaPendiente lectura = sincronizandoPendiente
+                                ? pendientes.peek()
+                                : crearLecturaPendiente(idAcel, indice);
+                        boolean enviado = enviarLectura(conexion, coordinador, idAcel, lectura);
                         if (!enviado) {
+                            if (!sincronizandoPendiente) {
+                                pendientes.add(lectura);
+                                indice++;
+                                registrarLecturaEncolada(lectura, "FALLO_ENVIO", pendientes.size());
+                            }
                             coordinador = elegirCoordinador(servidores, idAcel, "FALLO_ENVIO", indice + 1);
                             break;
                         }
-                        indice++;
-                        esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
+                        if (sincronizandoPendiente) {
+                            pendientes.remove();
+                            registrarLecturaSincronizada(lectura, coordinador, pendientes.size());
+                        } else {
+                            indice++;
+                        }
+                        if (System.nanoTime() >= proximaRevisionPrioridadNs) {
+                            NodoServidor preferente = elegirCoordinador(servidores, idAcel, "REVISION_PRIORIDAD",
+                                    indice);
+                            proximaRevisionPrioridadNs = siguienteRevisionPrioridadNs();
+                            if (debeMigrarPorPrioridad(coordinador, preferente)) {
+                                registrarMigracionPorRecuperacion(coordinador, preferente, idAcel, indice);
+                                coordinador = preferente;
+                                break;
+                            }
+                        }
+                        if (!sincronizandoPendiente) {
+                            esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
+                        }
                     }
                 } catch (Exception ex) {
                     registrarFalloCoordinador(coordinador, idAcel, "CONEXION", indice + 1, ex);
                     coordinador = elegirCoordinador(servidores, idAcel, "FALLO_CONEXION", indice + 1);
+                    proximaRevisionPrioridadNs = siguienteRevisionPrioridadNs();
                 }
             }
         } catch (Exception ex) {
@@ -121,17 +162,12 @@ public class EstacionAcelTCP {
         return new ConexionServidor(socket, entrada, salida);
     }
 
-    private static boolean enviarLectura(ConexionServidor conexion, NodoServidor servidor, String idAcel, int indice) {
-        double x = 0.020 + indice * 0.001;
-        double y = -0.010 - indice * 0.001;
-        double z = 0.980 + indice * 0.001;
-        int secuencia = indice + 1;
-        String payload = "SEQ:" + secuencia + ";" + LecturaTriaxial.crearPayload(idAcel, x, y, z);
-
+    private static boolean enviarLectura(ConexionServidor conexion, NodoServidor servidor, String idAcel,
+            LecturaPendiente lectura) {
         try {
             Instant clienteEnvio = Instant.now();
             long tiempoInicial = System.nanoTime();
-            conexion.salida.println(payload);
+            conexion.salida.println(lectura.payload);
             if (conexion.salida.checkError()) {
                 throw new IOException("No se pudo escribir en el socket");
             }
@@ -154,15 +190,17 @@ public class EstacionAcelTCP {
             System.out.printf(Locale.US,
                     "[DESGLOSE TCP] servidor=%s | servidorProc=%.4f ms | redEstimada=%.4f ms | idaEstimada=%.4f ms | vueltaEstimada=%.4f ms%n",
                     servidor.idEfectivo(), servidorProcMs, redEstimadaMs, idaEstimadaMs, vueltaEstimadaMs);
-            conexion.salida.println("METRICA_TCP;ID_ACEL:" + idAcel + ";SEQ:" + secuencia + ";RTT_MS:"
+            conexion.salida.println("METRICA_TCP;ID_ACEL:" + idAcel + ";SEQ:" + lectura.secuencia + ";RTT_MS:"
                     + RegistroMetricas.ms(tTxMs) + ";SERVIDOR_PROC_MS:" + RegistroMetricas.ms(servidorProcMs)
                     + ";RED_ESTIMADA_MS:" + RegistroMetricas.ms(redEstimadaMs) + ";IDA_ESTIMADA_MS:"
                     + RegistroMetricas.ms(idaEstimadaMs) + ";VUELTA_ESTIMADA_MS:"
                     + RegistroMetricas.ms(vueltaEstimadaMs));
             RegistroMetricas.escribir("cliente_tcp_metricas.log",
-                    RegistroMetricas.linea("TCP_CLIENTE", "idAcel=" + idAcel, "seq=" + secuencia,
+                    RegistroMetricas.linea("TCP_CLIENTE", "idAcel=" + idAcel, "seq=" + lectura.secuencia,
                             "coordinador=" + servidor.etiqueta(), "idServidor=" + servidor.idEfectivo(),
                             "prioridad=" + servidor.prioridadEfectiva(),
+                            "origen=" + lectura.origen,
+                            "generadoEn=" + lectura.generadoEn,
                             "tTxMs=" + RegistroMetricas.ms(tTxMs),
                             "servidorProcMs=" + RegistroMetricas.ms(servidorProcMs),
                             "redEstimadaMs=" + RegistroMetricas.ms(redEstimadaMs),
@@ -171,12 +209,41 @@ public class EstacionAcelTCP {
                             "clienteEnvio=" + clienteEnvio, "servidorRecibido="
                                     + extraerCampo(ack, "SERVIDOR_RECIBIDO", "-"),
                             "servidorAck=" + extraerCampo(ack, "SERVIDOR_ACK", "-"),
-                            "clienteAck=" + clienteAck, "ack=" + ack, "payload=" + payload));
+                            "clienteAck=" + clienteAck, "ack=" + ack, "payload=" + lectura.payload));
             return true;
         } catch (Exception ex) {
-            registrarFalloCoordinador(servidor, idAcel, "ENVIO", secuencia, ex);
+            registrarFalloCoordinador(servidor, idAcel, "ENVIO", lectura.secuencia, ex);
             return false;
         }
+    }
+
+    private static LecturaPendiente crearLecturaPendiente(String idAcel, int indice) {
+        double x = 0.020 + indice * 0.001;
+        double y = -0.010 - indice * 0.001;
+        double z = 0.980 + indice * 0.001;
+        int secuencia = indice + 1;
+        String payload = "SEQ:" + secuencia + ";" + LecturaTriaxial.crearPayload(idAcel, x, y, z);
+        return new LecturaPendiente(secuencia, payload, Instant.now());
+    }
+
+    private static boolean puedeGenerar(int indice, int repeticiones, long finNs) {
+        return (repeticiones == REPETICIONES_PERMANENTE || indice < repeticiones)
+                && System.nanoTime() < finNs;
+    }
+
+    private static void registrarLecturaEncolada(LecturaPendiente lectura, String motivo, int pendientes) {
+        RegistroMetricas.escribir("cliente_eleccion.log",
+                RegistroMetricas.linea("COLA_LOCAL_ENCOLADO", "seq=" + lectura.secuencia,
+                        "motivo=" + motivo, "pendientes=" + pendientes,
+                        "generadoEn=" + lectura.generadoEn, "payload=" + lectura.payload));
+    }
+
+    private static void registrarLecturaSincronizada(LecturaPendiente lectura, NodoServidor servidor, int pendientes) {
+        RegistroMetricas.escribir("cliente_eleccion.log",
+                RegistroMetricas.linea("COLA_LOCAL_SINCRONIZADO", "seq=" + lectura.secuencia,
+                        "coordinador=" + servidor.etiqueta(), "idServidor=" + servidor.idEfectivo(),
+                        "prioridad=" + servidor.prioridadEfectiva(), "pendientes=" + pendientes,
+                        "generadoEn=" + lectura.generadoEn, "sincronizadoEn=" + Instant.now()));
     }
 
     private static NodoServidor elegirCoordinador(List<NodoServidor> servidores, String idAcel, String motivo,
@@ -245,6 +312,36 @@ public class EstacionAcelTCP {
                 RegistroMetricas.linea("FALLO_COORDINADOR", "idAcel=" + idAcel, "fase=" + fase,
                         "seq=" + secuencia, "coordinador=" + etiqueta,
                         "error=" + ex.getClass().getSimpleName(), "detalle=" + ex.getMessage()));
+    }
+
+    private static boolean debeMigrarPorPrioridad(NodoServidor actual, NodoServidor preferente) {
+        if (actual == null || preferente == null) {
+            return false;
+        }
+        return !mismoServidor(actual, preferente)
+                && preferente.prioridadEfectiva() > actual.prioridadEfectiva();
+    }
+
+    private static boolean mismoServidor(NodoServidor a, NodoServidor b) {
+        return a.host.equalsIgnoreCase(b.host) && a.puerto == b.puerto;
+    }
+
+    private static void registrarMigracionPorRecuperacion(NodoServidor anterior, NodoServidor nuevo, String idAcel,
+            int secuencia) {
+        System.out.println("Servidor de mayor prioridad recuperado. Migrando de " + anterior.etiqueta()
+                + " a " + nuevo.etiqueta());
+        RegistroMetricas.escribir("cliente_eleccion.log",
+                RegistroMetricas.linea("MIGRACION_COORDINADOR_RECUPERADO", "idAcel=" + idAcel,
+                        "seq=" + secuencia,
+                        "anterior=" + anterior.etiqueta(),
+                        "prioridadAnterior=" + anterior.prioridadEfectiva(),
+                        "nuevo=" + nuevo.etiqueta(),
+                        "prioridadNueva=" + nuevo.prioridadEfectiva(),
+                        "criterio=mayor_prioridad_viva"));
+    }
+
+    private static long siguienteRevisionPrioridadNs() {
+        return System.nanoTime() + REVISION_PRIORIDAD_MS * 1_000_000L;
     }
 
     private static List<NodoServidor> parsearServidores(String texto, int puertoDefecto) {
@@ -385,6 +482,20 @@ public class EstacionAcelTCP {
             return Integer.parseInt(texto);
         } catch (Exception ex) {
             return defecto;
+        }
+    }
+
+    private static final class LecturaPendiente {
+        private final int secuencia;
+        private final String payload;
+        private final Instant generadoEn;
+        private final String origen;
+
+        private LecturaPendiente(int secuencia, String payload, Instant generadoEn) {
+            this.secuencia = secuencia;
+            this.payload = payload;
+            this.generadoEn = generadoEn;
+            this.origen = "COLA_LOCAL";
         }
     }
 
