@@ -81,6 +81,37 @@ public class HiloDespachador implements Runnable {
                     continue;
                 }
 
+                if (linea.startsWith("SUSCRIBIR_ALERTAS;")) {
+                    idSesion = extraerCampo(linea, "ID_ACEL", idSesion);
+                    clienteRemoto = direccionRemota(cliente);
+                    GestorAlertasSismo.registrar(idSesion, salida, clienteRemoto);
+                    salida.println("ACK_SUSCRIPCION_ALERTAS;ID_ACEL:" + idSesion + ";RECIBIDO:" + Instant.now());
+                    System.out.println("Cliente suscrito a alertas de sismo: " + idSesion + " desde "
+                            + clienteRemoto);
+                    continue;
+                }
+
+                if (linea.startsWith("SIMULAR_SISMO;")) {
+                    String idEvento = extraerCampo(linea, "ID_EVENTO", "SISMO-" + System.currentTimeMillis());
+                    long duracionMs = Long.parseLong(extraerCampo(linea, "DURACION_MS", "10000"));
+                    long retardoClienteMs = Long.parseLong(extraerCampo(linea, "RETARDO_CLIENTE_MS",
+                            Long.toString(duracionMs)));
+                    GestorAlertasSismo.simularSismo(idEvento, duracionMs, retardoClienteMs);
+                    salida.println("ACK_SIMULACION_SISMO;ID_EVENTO:" + idEvento + ";DURACION_MS:" + duracionMs
+                            + ";RETARDO_CLIENTE_MS:" + retardoClienteMs + ";RECIBIDO:" + Instant.now());
+                    continue;
+                }
+
+                if (linea.startsWith("CONSULTAR_SISMO;")) {
+                    idSesion = extraerCampo(linea, "ID_ACEL", idSesion);
+                    clienteRemoto = direccionRemota(cliente);
+                    int prioridadCliente = Integer.parseInt(extraerCampo(linea, "PRIORIDAD", "9"));
+                    long retardoAtencionMs = Long.parseLong(extraerCampo(linea, "RETARDO_ATENCION_MS", "5000"));
+                    GestorAlertasSismo.consultarMovimiento(idSesion, prioridadCliente, clienteRemoto, salida,
+                            retardoAtencionMs);
+                    continue;
+                }
+
                 if (linea.startsWith("HELLO;")) {
                     idSesion = extraerCampo(linea, "ID_ACEL", idSesion);
                     clienteRemoto = direccionRemota(cliente);
@@ -148,6 +179,7 @@ public class HiloDespachador implements Runnable {
                             "error=" + ex.getClass().getSimpleName(), "detalle=" + ex.getMessage()));
             ex.printStackTrace();
         } finally {
+            GestorAlertasSismo.desregistrar(idSesion);
             RegistroMetricas.escribir("servidor_tcp_metricas.log",
                     RegistroMetricas.linea("TCP_CONEXION_CERRADA", "idAcel=" + idSesion,
                             "cliente=" + clienteRemoto, estadisticas.resumen()));
@@ -159,22 +191,60 @@ public class HiloDespachador implements Runnable {
         Instant servidorRecibido = Instant.now();
         long tiempoInicial = System.nanoTime();
         LecturaTriaxial lectura = LecturaTriaxial.desdePayload(payload);
-        obtenerAdministradorRecursos().procesarLecturaEstacion(lectura.getIdAcel(), payload);
+        AdministradorRecursosSismicos.ResultadoAdmision admision =
+                obtenerAdministradorRecursos().procesarLecturaEstacion(lectura.getIdAcel(), payload);
         long tiempoFinal = System.nanoTime();
         double procesamientoMs = (tiempoFinal - tiempoInicial) / 1_000_000.0;
         String seq = extraerCampo(payload, "SEQ", "-");
         Instant servidorAck = Instant.now();
 
+        if (admision.isBloqueado()) {
+            System.out.println("TCP bloqueado por semaforo desde " + direccionRemota(cliente) + " -> "
+                    + lectura + " SEQ=" + seq);
+            salida.println("ACK_BLOQUEADO;ID_ACEL:" + lectura.getIdAcel() + ";SEQ:" + seq
+                    + ";MOTIVO:SEMAFORO_SATURADO;SERVIDOR_RECIBIDO:" + servidorRecibido
+                    + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:" + RegistroMetricas.ms(procesamientoMs)
+                    + ";ESPERA_SEMAFORO_MS:" + RegistroMetricas.ms(admision.getEsperaMs())
+                    + ";PERMISOS_DISPONIBLES:" + admision.getPermisosDisponibles());
+            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                    RegistroMetricas.linea("TCP_LECTURA_BLOQUEADA", "idAcel=" + lectura.getIdAcel(),
+                            "seq=" + seq,
+                            "cliente=" + direccionRemota(cliente),
+                            "servidorRecibido=" + servidorRecibido,
+                            "servidorAck=" + servidorAck,
+                            "procesamientoMs=" + RegistroMetricas.ms(procesamientoMs),
+                            "esperaSemaforoMs=" + RegistroMetricas.ms(admision.getEsperaMs()),
+                            "permisosDisponibles=" + admision.getPermisosDisponibles(),
+                            "prioridadCliente=" + extraerCampo(payload, "PRIORIDAD_CLIENTE", "-"),
+                            "distanciaM=" + extraerCampo(payload, "DISTANCIA_M", "-"),
+                            "movimiento=" + extraerCampo(payload, "MOVIMIENTO", "-"),
+                            "intensidad=" + extraerCampo(payload, "INTENSIDAD", "-"),
+                            "origen=" + extraerCampo(payload, "ORIGEN", "-"),
+                            "payload=" + payload,
+                            estadisticas.resumen()));
+            return;
+        }
+
         estadisticas.registrarLectura(procesamientoMs);
         System.out.println("TCP recibido desde " + direccionRemota(cliente) + " -> " + lectura + " SEQ=" + seq);
         salida.println("ACK_TCP;ID_ACEL:" + lectura.getIdAcel() + ";SEQ:" + seq + ";SERVIDOR_RECIBIDO:"
                 + servidorRecibido + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:"
-                + RegistroMetricas.ms(procesamientoMs));
+                + RegistroMetricas.ms(procesamientoMs) + ";ESPERA_SEMAFORO_MS:"
+                + RegistroMetricas.ms(admision.getEsperaMs()) + ";PERMISOS_DISPONIBLES:"
+                + admision.getPermisosDisponibles());
         RegistroMetricas.escribir("servidor_tcp_metricas.log",
                 RegistroMetricas.linea("TCP_LECTURA_RECIBIDA", "idAcel=" + lectura.getIdAcel(), "seq=" + seq,
                         "cliente=" + direccionRemota(cliente), "servidorRecibido=" + servidorRecibido,
                         "servidorAck=" + servidorAck,
-                        "procesamientoMs=" + RegistroMetricas.ms(procesamientoMs), "payload=" + payload,
+                        "procesamientoMs=" + RegistroMetricas.ms(procesamientoMs),
+                        "esperaSemaforoMs=" + RegistroMetricas.ms(admision.getEsperaMs()),
+                        "permisosDisponibles=" + admision.getPermisosDisponibles(),
+                        "prioridadCliente=" + extraerCampo(payload, "PRIORIDAD_CLIENTE", "-"),
+                        "distanciaM=" + extraerCampo(payload, "DISTANCIA_M", "-"),
+                        "movimiento=" + extraerCampo(payload, "MOVIMIENTO", "-"),
+                        "intensidad=" + extraerCampo(payload, "INTENSIDAD", "-"),
+                        "origen=" + extraerCampo(payload, "ORIGEN", "-"),
+                        "payload=" + payload,
                         estadisticas.resumen()));
     }
 

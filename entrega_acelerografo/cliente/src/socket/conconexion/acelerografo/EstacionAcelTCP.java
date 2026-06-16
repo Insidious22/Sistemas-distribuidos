@@ -26,7 +26,7 @@ public class EstacionAcelTCP {
     private static final String ID_ACEL_DEFECTO = "EC-UCON01";
     private static final int REPETICIONES_PERMANENTE = 0;
     private static final int TIMEOUT_CONEXION_MS = 2000;
-    private static final int TIMEOUT_ACK_MS = 5000;
+    private static final int TIMEOUT_ACK_MS = 15000;
     private static final int TIMEOUT_MONITOR_MS = 400;
     private static final int PAUSA_REELECCION_MS = 1000;
     private static final long REVISION_PRIORIDAD_MS = 5000L;
@@ -51,6 +51,10 @@ public class EstacionAcelTCP {
                             : (int) INTERVALO_DEFECTO_MS);
             int repeticiones = args.length >= 5 ? Integer.parseInt(args[4]) : REPETICIONES_PERMANENTE;
             int duracionSegundos = args.length >= 6 ? Integer.parseInt(args[5]) : 0;
+            int prioridadCliente = args.length >= 7 ? Integer.parseInt(args[6]) : prioridadSugerida(idAcel);
+            double distanciaM = args.length >= 8 ? Double.parseDouble(args[7]) : distanciaSugerida(prioridadCliente);
+            int duracionSismoSegundos = args.length >= 9 ? Integer.parseInt(args[8]) : duracionSegundos;
+            PerfilSismo perfilSismo = new PerfilSismo(prioridadCliente, distanciaM, duracionSismoSegundos);
             long finNs = duracionSegundos > 0
                     ? System.nanoTime() + duracionSegundos * 1_000_000_000L
                     : Long.MAX_VALUE;
@@ -64,7 +68,8 @@ public class EstacionAcelTCP {
             while (puedeGenerar(indice, repeticiones, finNs) || !pendientes.isEmpty()) {
                 if (coordinador == null) {
                     if (puedeGenerar(indice, repeticiones, finNs)) {
-                        LecturaPendiente lectura = crearLecturaPendiente(idAcel, indice);
+                        LecturaPendiente lectura = crearLecturaPendiente(idAcel, indice, perfilSismo,
+                                "COLA_LOCAL", pendientes.size());
                         pendientes.add(lectura);
                         indice++;
                         registrarLecturaEncolada(lectura, "SIN_COORDINADOR", pendientes.size());
@@ -95,9 +100,11 @@ public class EstacionAcelTCP {
                         boolean sincronizandoPendiente = !pendientes.isEmpty();
                         LecturaPendiente lectura = sincronizandoPendiente
                                 ? pendientes.peek()
-                                : crearLecturaPendiente(idAcel, indice);
-                        boolean enviado = enviarLectura(conexion, coordinador, idAcel, lectura, servidores);
-                        if (!enviado) {
+                                : crearLecturaPendiente(idAcel, indice, perfilSismo, "TIEMPO_REAL",
+                                        pendientes.size());
+                        ResultadoEnvio resultado = enviarLectura(conexion, coordinador, idAcel, lectura,
+                                servidores);
+                        if (resultado.esFallo()) {
                             if (!sincronizandoPendiente) {
                                 pendientes.add(lectura);
                                 indice++;
@@ -108,6 +115,31 @@ public class EstacionAcelTCP {
                             }
                             coordinador = elegirCoordinador(servidores, idAcel, "FALLO_ENVIO", indice + 1);
                             break;
+                        }
+                        if (resultado.esBloqueo()) {
+                            if (!sincronizandoPendiente) {
+                                LecturaPendiente encolada = lectura.conOrigen("COLA_BLOQUEO");
+                                pendientes.add(encolada);
+                                indice++;
+                                registrarLecturaEncolada(encolada, "BLOQUEO_SEMAFORO", pendientes.size());
+                                publicarMonitorGlobal(servidores, idAcel, "COLA_BLOQUEO_ENCOLADO",
+                                        encolada.secuencia, coordinador, "motivo=SEMAFORO_SATURADO",
+                                        "pendientes=" + pendientes.size(), "origen=COLA_BLOQUEO",
+                                        "detalle=cliente_sigue_generando_mientras_espera");
+                            } else if (puedeGenerar(indice, repeticiones, finNs)) {
+                                LecturaPendiente nuevaLocal = crearLecturaPendiente(idAcel, indice, perfilSismo,
+                                        "COLA_BLOQUEO", pendientes.size() + 1);
+                                pendientes.add(nuevaLocal);
+                                indice++;
+                                registrarLecturaEncolada(nuevaLocal, "BLOQUEO_SEMAFORO_CONTINUA_GENERANDO",
+                                        pendientes.size());
+                                publicarMonitorGlobal(servidores, idAcel, "COLA_BLOQUEO_ENCOLADO",
+                                        nuevaLocal.secuencia, coordinador, "motivo=SEMAFORO_SATURADO",
+                                        "pendientes=" + pendientes.size(), "origen=COLA_BLOQUEO",
+                                        "detalle=lectura_generada_mientras_otro_cliente_ocupa_servidor");
+                            }
+                            esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
+                            continue;
                         }
                         if (sincronizandoPendiente) {
                             pendientes.remove();
@@ -176,9 +208,10 @@ public class EstacionAcelTCP {
         return new ConexionServidor(socket, entrada, salida);
     }
 
-    private static boolean enviarLectura(ConexionServidor conexion, NodoServidor servidor, String idAcel,
+    private static ResultadoEnvio enviarLectura(ConexionServidor conexion, NodoServidor servidor, String idAcel,
             LecturaPendiente lectura, List<NodoServidor> servidores) {
         try {
+            dormir(lectura.retardoPrioridadMs);
             Instant clienteEnvio = Instant.now();
             long tiempoInicial = System.nanoTime();
             conexion.salida.println(lectura.payload);
@@ -194,6 +227,33 @@ public class EstacionAcelTCP {
             long tiempoFinal = System.nanoTime();
             Instant clienteAck = Instant.now();
             double tTxMs = (tiempoFinal - tiempoInicial) / 1_000_000.0;
+            if (ack.startsWith("ACK_BLOQUEADO;")) {
+                System.out.println("Servidor ocupado para " + lectura.idAcel + " seq=" + lectura.secuencia
+                        + ". Lectura queda en cola local.");
+                RegistroMetricas.escribir("cliente_bloqueo_sismo.log",
+                        RegistroMetricas.linea("CLIENTE_BLOQUEADO_POR_SEMAFORO",
+                                "idAcel=" + idAcel,
+                                "seq=" + lectura.secuencia,
+                                "coordinador=" + servidor.etiqueta(),
+                                "prioridadCliente=" + lectura.prioridadCliente,
+                                "distanciaM=" + RegistroMetricas.ms(lectura.distanciaM),
+                                "movimiento=" + lectura.movimiento,
+                                "intensidad=" + RegistroMetricas.ms(lectura.intensidad),
+                                "origen=" + lectura.origen,
+                                "tTxMs=" + RegistroMetricas.ms(tTxMs),
+                                "esperaSemaforoMs=" + extraerCampo(ack, "ESPERA_SEMAFORO_MS", "-"),
+                                "motivo=" + extraerCampo(ack, "MOTIVO", "-"),
+                                "ack=" + ack,
+                                "payload=" + lectura.payload));
+                publicarMonitorGlobal(servidores, idAcel, "BLOQUEADO_SEMAFORO", lectura.secuencia, servidor,
+                        "rttMs=" + RegistroMetricas.ms(tTxMs),
+                        "motivo=" + extraerCampo(ack, "MOTIVO", "-"),
+                        "origen=" + lectura.origen,
+                        "pendientes=-",
+                        "detalle=lectura_no_ingreso_servidor_y_se_guardara_local");
+                return ResultadoEnvio.bloqueado();
+            }
+
             double servidorProcMs = Double.parseDouble(extraerCampo(ack, "SERVIDOR_PROC_MS", "0"));
             double redEstimadaMs = Math.max(0.0, tTxMs - servidorProcMs);
             double idaEstimadaMs = redEstimadaMs / 2.0;
@@ -213,6 +273,10 @@ public class EstacionAcelTCP {
                     RegistroMetricas.linea("TCP_CLIENTE", "idAcel=" + idAcel, "seq=" + lectura.secuencia,
                             "coordinador=" + servidor.etiqueta(), "idServidor=" + servidor.idEfectivo(),
                             "prioridad=" + servidor.prioridadEfectiva(),
+                            "prioridadCliente=" + lectura.prioridadCliente,
+                            "distanciaM=" + RegistroMetricas.ms(lectura.distanciaM),
+                            "movimiento=" + lectura.movimiento,
+                            "intensidad=" + RegistroMetricas.ms(lectura.intensidad),
                             "origen=" + lectura.origen,
                             "generadoEn=" + lectura.generadoEn,
                             "tTxMs=" + RegistroMetricas.ms(tTxMs),
@@ -229,20 +293,40 @@ public class EstacionAcelTCP {
                     "redMs=" + RegistroMetricas.ms(redEstimadaMs),
                     "origen=" + lectura.origen,
                     "detalle=ack_recibido");
-            return true;
+            if ("COLA_BLOQUEO".equals(lectura.origen) || "COLA_LOCAL".equals(lectura.origen)) {
+                RegistroMetricas.escribir("cliente_bloqueo_sismo.log",
+                        RegistroMetricas.linea("COLA_DESBLOQUEADA_ENVIO_OK",
+                                "idAcel=" + idAcel,
+                                "seq=" + lectura.secuencia,
+                                "coordinador=" + servidor.etiqueta(),
+                                "prioridadCliente=" + lectura.prioridadCliente,
+                                "distanciaM=" + RegistroMetricas.ms(lectura.distanciaM),
+                                "movimiento=" + lectura.movimiento,
+                                "intensidad=" + RegistroMetricas.ms(lectura.intensidad),
+                                "origen=" + lectura.origen,
+                                "tTxMs=" + RegistroMetricas.ms(tTxMs),
+                                "ack=" + ack));
+            }
+            return ResultadoEnvio.ok();
         } catch (Exception ex) {
             registrarFalloCoordinador(servidor, idAcel, "ENVIO", lectura.secuencia, ex);
-            return false;
+            return ResultadoEnvio.fallo();
         }
     }
 
-    private static LecturaPendiente crearLecturaPendiente(String idAcel, int indice) {
-        double x = 0.020 + indice * 0.001;
-        double y = -0.010 - indice * 0.001;
-        double z = 0.980 + indice * 0.001;
+    private static LecturaPendiente crearLecturaPendiente(String idAcel, int indice, PerfilSismo perfil,
+            String origen, int pendientesCliente) {
+        MuestraLocal muestra = perfil.muestra(indice);
         int secuencia = indice + 1;
-        String payload = "SEQ:" + secuencia + ";" + LecturaTriaxial.crearPayload(idAcel, x, y, z);
-        return new LecturaPendiente(secuencia, payload, Instant.now());
+        String payload = "SEQ:" + secuencia + ";" + LecturaTriaxial.crearPayload(idAcel, muestra.x, muestra.y,
+                muestra.z) + ";PRIORIDAD_CLIENTE:" + perfil.prioridadCliente
+                + ";DISTANCIA_M:" + RegistroMetricas.ms(perfil.distanciaM)
+                + ";MOVIMIENTO:" + (muestra.movimiento ? "SI" : "NO")
+                + ";INTENSIDAD:" + RegistroMetricas.ms(muestra.intensidad)
+                + ";ORIGEN:" + origen
+                + ";PENDIENTES_CLIENTE:" + pendientesCliente;
+        return new LecturaPendiente(secuencia, idAcel, payload, Instant.now(), origen, perfil.prioridadCliente,
+                perfil.distanciaM, muestra.intensidad, muestra.movimiento, perfil.retardoPrioridadMs());
     }
 
     private static boolean puedeGenerar(int indice, int repeticiones, long finNs) {
@@ -547,6 +631,8 @@ public class EstacionAcelTCP {
         System.out.println("  java -cp out socket.conconexion.acelerografo.EstacionAcelTCP <ipServidor> [puerto] [idAcel] [intervaloMs] [repeticiones] [duracionSegundos]");
         System.out.println("Uso redundante con eleccion:");
         System.out.println("  java -cp out socket.conconexion.acelerografo.EstacionAcelTCP <ipA:puerto,ipB:puerto,ipC:puerto> [puertoDefecto] [idAcel] [intervaloMs] [repeticiones] [duracionSegundos]");
+        System.out.println("Uso con sismo/concurrencia:");
+        System.out.println("  java -cp out socket.conconexion.acelerografo.EstacionAcelTCP <servidores> [puerto] [idAcel] [intervaloMs] [repeticiones] [duracionSegundos] [prioridadCliente] [distanciaM] [duracionSismoSegundos]");
         System.out.println("Sin argumentos, el cliente pide datos basicos y queda permanente hasta Ctrl + C.");
     }
 
@@ -587,17 +673,165 @@ public class EstacionAcelTCP {
         }
     }
 
+    private static int prioridadSugerida(String idAcel) {
+        String normalizado = idAcel == null ? "" : idAcel.toUpperCase(Locale.US);
+        if (normalizado.contains("UNO")) {
+            return 1;
+        }
+        if (normalizado.contains("DOS")) {
+            return 2;
+        }
+        if (normalizado.contains("TRES")) {
+            return 3;
+        }
+        if (normalizado.contains("CUATRO")) {
+            return 4;
+        }
+        return 9;
+    }
+
+    private static double distanciaSugerida(int prioridadCliente) {
+        switch (prioridadCliente) {
+            case 1:
+                return 10.0;
+            case 2:
+                return 18.0;
+            case 3:
+                return 42.0;
+            case 4:
+                return 55.0;
+            default:
+                return 99.0;
+        }
+    }
+
     private static final class LecturaPendiente {
         private final int secuencia;
+        private final String idAcel;
         private final String payload;
         private final Instant generadoEn;
         private final String origen;
+        private final int prioridadCliente;
+        private final double distanciaM;
+        private final double intensidad;
+        private final String movimiento;
+        private final long retardoPrioridadMs;
 
-        private LecturaPendiente(int secuencia, String payload, Instant generadoEn) {
+        private LecturaPendiente(int secuencia, String idAcel, String payload, Instant generadoEn, String origen,
+                int prioridadCliente, double distanciaM, double intensidad, boolean movimiento,
+                long retardoPrioridadMs) {
             this.secuencia = secuencia;
+            this.idAcel = idAcel;
             this.payload = payload;
             this.generadoEn = generadoEn;
-            this.origen = "COLA_LOCAL";
+            this.origen = origen;
+            this.prioridadCliente = prioridadCliente;
+            this.distanciaM = distanciaM;
+            this.intensidad = intensidad;
+            this.movimiento = movimiento ? "SI" : "NO";
+            this.retardoPrioridadMs = retardoPrioridadMs;
+        }
+
+        private LecturaPendiente conOrigen(String nuevoOrigen) {
+            String payloadActualizado = reemplazarCampoPayload(payload, "ORIGEN", nuevoOrigen);
+            return new LecturaPendiente(secuencia, idAcel, payloadActualizado, generadoEn, nuevoOrigen,
+                    prioridadCliente, distanciaM, intensidad, "SI".equals(movimiento), retardoPrioridadMs);
+        }
+    }
+
+    private static String reemplazarCampoPayload(String payload, String campo, String valor) {
+        StringBuilder builder = new StringBuilder();
+        boolean reemplazado = false;
+        for (String parte : payload.split(";")) {
+            if (builder.length() > 0) {
+                builder.append(';');
+            }
+            if (parte.startsWith(campo + ":")) {
+                builder.append(campo).append(':').append(valor);
+                reemplazado = true;
+            } else {
+                builder.append(parte);
+            }
+        }
+        if (!reemplazado) {
+            builder.append(';').append(campo).append(':').append(valor);
+        }
+        return builder.toString();
+    }
+
+    private static final class PerfilSismo {
+        private final int prioridadCliente;
+        private final double distanciaM;
+        private final int duracionSismoSegundos;
+        private final long inicioNs;
+
+        private PerfilSismo(int prioridadCliente, double distanciaM, int duracionSismoSegundos) {
+            this.prioridadCliente = prioridadCliente;
+            this.distanciaM = distanciaM;
+            this.duracionSismoSegundos = duracionSismoSegundos;
+            this.inicioNs = System.nanoTime();
+        }
+
+        private MuestraLocal muestra(int indice) {
+            boolean eventoActivo = duracionSismoSegundos <= 0
+                    || System.nanoTime() - inicioNs <= duracionSismoSegundos * 1_000_000_000L;
+            double cercania = Math.max(0.05, Math.min(1.0, (45.0 - distanciaM) / 45.0));
+            double fase = indice + prioridadCliente;
+            double amplitud = eventoActivo ? cercania * 0.090 : 0.005;
+            double x = 0.020 + Math.sin(fase * 0.80) * amplitud;
+            double y = -0.010 + Math.cos(fase * 0.65) * amplitud;
+            double z = 0.980 + Math.sin(fase * 0.45) * amplitud;
+            double intensidad = Math.sqrt((x * x) + (y * y) + ((z - 0.980) * (z - 0.980)));
+            boolean movimiento = eventoActivo && intensidad >= 0.035;
+            return new MuestraLocal(x, y, z, intensidad, movimiento);
+        }
+
+        private long retardoPrioridadMs() {
+            return Math.max(0L, (prioridadCliente - 1L) * 80L);
+        }
+    }
+
+    private static final class MuestraLocal {
+        private final double x;
+        private final double y;
+        private final double z;
+        private final double intensidad;
+        private final boolean movimiento;
+
+        private MuestraLocal(double x, double y, double z, double intensidad, boolean movimiento) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.intensidad = intensidad;
+            this.movimiento = movimiento;
+        }
+    }
+
+    private static final class ResultadoEnvio {
+        private final String estado;
+
+        private ResultadoEnvio(String estado) {
+            this.estado = estado;
+        }
+
+        private static ResultadoEnvio ok() {
+            return new ResultadoEnvio("OK");
+        }
+
+        private static ResultadoEnvio bloqueado() {
+            return new ResultadoEnvio("BLOQUEADO");
+        }
+
+        private static ResultadoEnvio fallo() {
+            return new ResultadoEnvio("FALLO");
+        }
+
+        private boolean esBloqueo() {
+            return "BLOQUEADO".equals(estado);
+        }
+
+        private boolean esFallo() {
+            return "FALLO".equals(estado);
         }
     }
 

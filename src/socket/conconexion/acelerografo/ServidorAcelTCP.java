@@ -10,19 +10,23 @@ public class ServidorAcelTCP {
     private static final int PERMISOS_DEFECTO = 3;
     private static final String ID_SERVIDOR_DEFECTO = "SERVIDOR-ACEL";
     private static final int PRIORIDAD_DEFECTO = 1;
+    private static final long RETARDO_CRITICO_DEFECTO_MS = 500L;
 
     public static void main(String[] args) {
         int puerto = args.length >= 1 ? Integer.parseInt(args[0]) : PUERTO_DEFECTO;
         int permisosConcurrentes = args.length >= 2 ? Integer.parseInt(args[1]) : PERMISOS_DEFECTO;
         String idServidor = args.length >= 3 ? args[2] : ID_SERVIDOR_DEFECTO + "-" + puerto;
         int prioridadServidor = args.length >= 4 ? Integer.parseInt(args[3]) : PRIORIDAD_DEFECTO;
-        HiloDespachador.configurarAdministradorRecursos(new AdministradorRecursosSismicos(permisosConcurrentes));
+        long retardoCriticoMs = args.length >= 5 ? Long.parseLong(args[4]) : RETARDO_CRITICO_DEFECTO_MS;
+        HiloDespachador.configurarAdministradorRecursos(
+                new AdministradorRecursosSismicos(permisosConcurrentes, retardoCriticoMs));
         HiloDespachador.configurarNodoServidor(idServidor, prioridadServidor, puerto);
 
         try (ServerSocket servidor = new ServerSocket(puerto)) {
             System.out.println("Servidor TCP de acelerografos escuchando en puerto " + puerto);
             System.out.println("Nodo de redundancia: " + idServidor + " prioridad=" + prioridadServidor);
             System.out.println("Semaforo de admision configurado con " + permisosConcurrentes + " permiso(s).");
+            System.out.println("Retardo de zona critica configurado en " + retardoCriticoMs + " ms.");
             System.out.println("Informe a los clientes la IP LAN de esta maquina. Use Ctrl + C para detener.");
 
             while (!servidor.isClosed()) {
