@@ -227,6 +227,56 @@ TCP_LECTURA_BLOQUEADA
 TCP_LECTURA_RECIBIDA
 PERMISO_OTORGADO
 PERMISO_LIBERADO
+INTERBLOQUEO_DETECTADO
+INTERBLOQUEO_RESUELTO
+REINTENTO_SEGURO_OK
+```
+
+## Interbloqueo formal
+
+Ademas del semaforo de admision, el servidor simula interbloqueo real durante lecturas con `MOVIMIENTO:SI`.
+Para eso usa dos recursos internos:
+
+```text
+CANAL_ENVIO
+BITACORA_SISMICA
+```
+
+Los clientes con prioridad impar intentan tomar:
+
+```text
+CANAL_ENVIO -> BITACORA_SISMICA
+```
+
+Los clientes con prioridad par intentan tomar:
+
+```text
+BITACORA_SISMICA -> CANAL_ENVIO
+```
+
+Si dos clientes entran al mismo tiempo, puede pasar:
+
+```text
+EC-UNO tiene CANAL_ENVIO y espera BITACORA_SISMICA
+EC-DOS tiene BITACORA_SISMICA y espera CANAL_ENVIO
+```
+
+Ese ciclo es el interbloqueo. El servidor lo detecta, registra el ciclo, libera un recurso como victima y reintenta en orden seguro.
+
+Buscar evidencia del interbloqueo:
+
+```powershell
+Select-String logs\sismo_distribuido.log -Pattern "INTERBLOQUEO|RECURSO_TOMADO|ESPERA_RECURSO|REINTENTO_SEGURO"
+```
+
+Secuencia esperada:
+
+```text
+RECURSO_TOMADO
+ESPERA_RECURSO
+INTERBLOQUEO_DETECTADO
+INTERBLOQUEO_RESUELTO
+REINTENTO_SEGURO_OK
 ```
 
 ## Prueba secundaria: bloqueo por consulta de sismo
