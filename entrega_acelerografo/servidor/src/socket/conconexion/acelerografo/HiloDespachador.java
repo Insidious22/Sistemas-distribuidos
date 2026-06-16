@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import telemetria.RegistroMetricas;
 
 public class HiloDespachador implements Runnable {
+    private static final String LOG_SISMO = "sismo_distribuido.log";
     private static final ConcurrentHashMap<String, EstadisticasCliente> CLIENTES = new ConcurrentHashMap<String, EstadisticasCliente>();
     private static AdministradorRecursosSismicos recursosSismicos;
     private static String idServidor = "SERVIDOR-ACEL";
@@ -35,7 +36,7 @@ public class HiloDespachador implements Runnable {
         idServidor = idNodo;
         prioridadServidor = prioridad;
         puertoServidor = puerto;
-        RegistroMetricas.escribir("servidor_eleccion.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("NODO_SERVIDOR_CONFIGURADO", "idServidor=" + idServidor,
                         "prioridad=" + prioridadServidor, "puerto=" + puertoServidor));
     }
@@ -52,7 +53,7 @@ public class HiloDespachador implements Runnable {
                 PrintWriter salida = new PrintWriter(
                         new OutputStreamWriter(cliente.getOutputStream(), StandardCharsets.UTF_8), true)) {
 
-            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_CONEXION_ABIERTA", "cliente=" + direccionRemota(cliente)));
 
             String linea;
@@ -68,7 +69,7 @@ public class HiloDespachador implements Runnable {
                     salida.println("ELECCION_ACK;ID_SERV:" + idServidor + ";PRIORIDAD:" + prioridadServidor
                             + ";PUERTO:" + puertoServidor + ";ESTADO:VIVO;RONDA:" + ronda + ";RECIBIDO:"
                             + Instant.now());
-                    RegistroMetricas.escribir("servidor_eleccion.log",
+                    RegistroMetricas.escribir(LOG_SISMO,
                             RegistroMetricas.linea("ELECCION_PING_RECIBIDO", "idAcel=" + idAcel,
                                     "ronda=" + ronda, "cliente=" + direccionRemota(cliente),
                                     "respuesta=VIVO", "idServidor=" + idServidor,
@@ -122,7 +123,7 @@ public class HiloDespachador implements Runnable {
                             + prioridadServidor + ";RECIBIDO:" + Instant.now());
                     System.out.println("Cliente TCP conectado permanentemente: " + idSesion + " desde "
                             + clienteRemoto);
-                    RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                    RegistroMetricas.escribir(LOG_SISMO,
                             RegistroMetricas.linea("TCP_CLIENTE_CONECTADO", "idAcel=" + idSesion,
                                     "cliente=" + clienteRemoto, "idServidor=" + idServidor,
                                     "prioridad=" + prioridadServidor));
@@ -138,14 +139,14 @@ public class HiloDespachador implements Runnable {
                     estadisticas = CLIENTES.computeIfAbsent(idAcel,
                             id -> new EstadisticasCliente(id, direccionRemota(cliente)));
                     estadisticas.registrarMetricaCliente(rttMs, redEstimadaMs, idaEstimadaMs, vueltaEstimadaMs);
-                    RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                    RegistroMetricas.escribir(LOG_SISMO,
                             RegistroMetricas.linea("TCP_RTT_REPORTADO_POR_CLIENTE", "idAcel=" + idAcel,
                                     "seq=" + extraerCampo(linea, "SEQ", "-"), "rttMs=" + RegistroMetricas.ms(rttMs),
                                     "redEstimadaMs=" + RegistroMetricas.ms(redEstimadaMs),
                                     "idaEstimadaMs=" + RegistroMetricas.ms(idaEstimadaMs),
                                     "vueltaEstimadaMs=" + RegistroMetricas.ms(vueltaEstimadaMs),
                                     estadisticas.resumen()));
-                    RegistroMetricas.escribir("servidor_tcp_resumen.log",
+                    RegistroMetricas.escribir(LOG_SISMO,
                             RegistroMetricas.evento("METRICA", "PROMEDIO_CLIENTE", idAcel,
                                     unirCampos("seq=" + extraerCampo(linea, "SEQ", "-"),
                                             "rttActualMs=" + RegistroMetricas.ms(rttMs),
@@ -156,31 +157,31 @@ public class HiloDespachador implements Runnable {
                 procesarLectura(cliente, salida, linea, estadisticas);
             }
             System.out.println("Cliente desconectado: " + idSesion + " desde " + clienteRemoto);
-            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_CLIENTE_DESCONECTADO", "idAcel=" + idSesion,
                             "cliente=" + clienteRemoto, "modo=FIN_DE_STREAM"));
         } catch (SocketException ex) {
             System.out.println("Cliente desconectado abruptamente: " + idSesion + " desde " + clienteRemoto);
-            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_CLIENTE_DESCONECTADO", "idAcel=" + idSesion,
                             "cliente=" + clienteRemoto, "modo=ABRUPTO",
                             "detalle=" + ex.getMessage()));
         } catch (IOException ex) {
             System.out.println("Error de E/S con cliente " + idSesion + ". El servidor sigue activo.");
-            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_CLIENTE_IO_ERROR", "idAcel=" + idSesion,
                             "cliente=" + clienteRemoto, "error=" + ex.getClass().getSimpleName(),
                             "detalle=" + ex.getMessage()));
         } catch (Exception ex) {
             System.out.println("No se pudo procesar una lectura TCP de " + idSesion + ". El servidor sigue activo.");
-            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_SERVIDOR_ERROR", "idAcel=" + idSesion,
                             "cliente=" + clienteRemoto,
                             "error=" + ex.getClass().getSimpleName(), "detalle=" + ex.getMessage()));
             ex.printStackTrace();
         } finally {
             GestorAlertasSismo.desregistrar(idSesion);
-            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_CONEXION_CERRADA", "idAcel=" + idSesion,
                             "cliente=" + clienteRemoto, estadisticas.resumen()));
         }
@@ -206,7 +207,7 @@ public class HiloDespachador implements Runnable {
                     + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:" + RegistroMetricas.ms(procesamientoMs)
                     + ";ESPERA_SEMAFORO_MS:" + RegistroMetricas.ms(admision.getEsperaMs())
                     + ";PERMISOS_DISPONIBLES:" + admision.getPermisosDisponibles());
-            RegistroMetricas.escribir("servidor_tcp_metricas.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_LECTURA_BLOQUEADA", "idAcel=" + lectura.getIdAcel(),
                             "seq=" + seq,
                             "cliente=" + direccionRemota(cliente),
@@ -232,7 +233,7 @@ public class HiloDespachador implements Runnable {
                 + RegistroMetricas.ms(procesamientoMs) + ";ESPERA_SEMAFORO_MS:"
                 + RegistroMetricas.ms(admision.getEsperaMs()) + ";PERMISOS_DISPONIBLES:"
                 + admision.getPermisosDisponibles());
-        RegistroMetricas.escribir("servidor_tcp_metricas.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("TCP_LECTURA_RECIBIDA", "idAcel=" + lectura.getIdAcel(), "seq=" + seq,
                         "cliente=" + direccionRemota(cliente), "servidorRecibido=" + servidorRecibido,
                         "servidorAck=" + servidorAck,
@@ -252,7 +253,7 @@ public class HiloDespachador implements Runnable {
         String idAcel = extraerCampo(linea, "ID_ACEL", "SIN_ID");
         String evento = extraerCampo(linea, "EVENTO", "SIN_EVENTO");
         String seq = extraerCampo(linea, "SEQ", "-");
-        RegistroMetricas.escribir("monitor_global_clientes.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("MONITOR_CLIENTE", "idAcel=" + idAcel,
                         "eventoCliente=" + evento,
                         "seq=" + seq,
@@ -260,6 +261,10 @@ public class HiloDespachador implements Runnable {
                         "coordinador=" + extraerCampo(linea, "COORDINADOR", "-"),
                         "idServidor=" + extraerCampo(linea, "ID_SERV", "-"),
                         "prioridad=" + extraerCampo(linea, "PRIORIDAD", "-"),
+                        "prioridadCliente=" + extraerCampo(linea, "PRIORIDADCLIENTE", "-"),
+                        "distanciaM=" + extraerCampo(linea, "DISTANCIAM", "-"),
+                        "movimiento=" + extraerCampo(linea, "MOVIMIENTO", "-"),
+                        "intensidad=" + extraerCampo(linea, "INTENSIDAD", "-"),
                         "motivo=" + extraerCampo(linea, "MOTIVO", "-"),
                         "rttMs=" + extraerCampo(linea, "RTT_MS", "-"),
                         "redMs=" + extraerCampo(linea, "RED_MS", "-"),

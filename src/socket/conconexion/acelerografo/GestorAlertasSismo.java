@@ -10,6 +10,7 @@ import java.util.concurrent.Semaphore;
 import telemetria.RegistroMetricas;
 
 public final class GestorAlertasSismo {
+    private static final String LOG_SISMO = "sismo_distribuido.log";
     private static final ConcurrentHashMap<String, SuscriptorAlerta> SUSCRIPTORES =
             new ConcurrentHashMap<String, SuscriptorAlerta>();
     private static final Semaphore CANAL_ALERTA = new Semaphore(1, true);
@@ -22,7 +23,7 @@ public final class GestorAlertasSismo {
 
     public static void registrar(String idAcel, PrintWriter salida, String remoto) {
         SUSCRIPTORES.put(idAcel, new SuscriptorAlerta(idAcel, salida, remoto));
-        RegistroMetricas.escribir("interbloqueo_sismo.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("CLIENTE_ALERTA_REGISTRADO", "idAcel=" + idAcel,
                         "remoto=" + remoto, "suscriptores=" + SUSCRIPTORES.size()));
     }
@@ -30,7 +31,7 @@ public final class GestorAlertasSismo {
     public static void desregistrar(String idAcel) {
         SuscriptorAlerta removido = SUSCRIPTORES.remove(idAcel);
         if (removido != null) {
-            RegistroMetricas.escribir("interbloqueo_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("CLIENTE_ALERTA_DESCONECTADO", "idAcel=" + idAcel,
                             "remoto=" + removido.remoto, "suscriptores=" + SUSCRIPTORES.size()));
         }
@@ -39,7 +40,7 @@ public final class GestorAlertasSismo {
     public static void simularSismo(String idEvento, long duracionMs, long retardoPorClienteMs) {
         activarSismo(idEvento, duracionMs, retardoPorClienteMs);
         List<SuscriptorAlerta> suscriptores = new ArrayList<SuscriptorAlerta>(SUSCRIPTORES.values());
-        RegistroMetricas.escribir("interbloqueo_sismo.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("SISMO_INICIADO", "idEvento=" + idEvento,
                         "duracionMs=" + duracionMs, "retardoPorClienteMs=" + retardoPorClienteMs,
                         "clientesObjetivo=" + suscriptores.size(), "inicio=" + Instant.now()));
@@ -62,7 +63,7 @@ public final class GestorAlertasSismo {
             Thread.sleep(Math.min(300L, (prioridad - 1L) * 100L));
         }
 
-        RegistroMetricas.escribir("interbloqueo_sismo.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("CLIENTE_DETECTA_MOVIMIENTO_Y_CONSULTA",
                         "idAcel=" + idAcel,
                         "prioridad=" + prioridad,
@@ -78,7 +79,7 @@ public final class GestorAlertasSismo {
                     + ";MOTIVO:CANAL_OCUPADO_POR_PRIORIDAD;CLIENTE_EN_ATENCION:" + ocupante
                     + ";ESPERA_AVISO_MS:" + RegistroMetricas.ms(esperaAvisoMs)
                     + ";SERVIDOR_AVISO:" + Instant.now());
-            RegistroMetricas.escribir("interbloqueo_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("CLIENTE_CONSULTA_BLOQUEADO",
                             "idAcel=" + idAcel,
                             "prioridad=" + prioridad,
@@ -97,7 +98,7 @@ public final class GestorAlertasSismo {
             double esperaTotalMs = (System.nanoTime() - inicioEsperaNs) / 1_000_000.0;
             MuestraMovimiento muestra = muestraActual();
             boolean hayMovimiento = muestra.activo;
-            RegistroMetricas.escribir("interbloqueo_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("CLIENTE_ENTRA_CONSULTA_SISMO",
                             "idAcel=" + idAcel,
                             "prioridad=" + prioridad,
@@ -121,7 +122,7 @@ public final class GestorAlertasSismo {
                     + ";ESPERA_TOTAL_MS:" + RegistroMetricas.ms(esperaTotalMs)
                     + ";SERVIDOR_RESPUESTA:" + Instant.now());
 
-            RegistroMetricas.escribir("interbloqueo_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("RESPUESTA_CONSULTA_SISMO_ENVIADA",
                             "idAcel=" + idAcel,
                             "prioridad=" + prioridad,
@@ -134,7 +135,7 @@ public final class GestorAlertasSismo {
             if (adquirido) {
                 clienteEnConsulta = "-";
                 CANAL_CONSULTA.release();
-                RegistroMetricas.escribir("interbloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("CLIENTE_LIBERA_CONSULTA_SISMO",
                                 "idAcel=" + idAcel,
                                 "prioridad=" + prioridad,
@@ -194,7 +195,7 @@ public final class GestorAlertasSismo {
             long esperaInicioNs = System.nanoTime();
             boolean adquirido = false;
             try {
-                RegistroMetricas.escribir("interbloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("CLIENTE_BLOQUEADO_ESPERANDO_ALERTA",
                                 "idEvento=" + idEvento,
                                 "idAcel=" + suscriptor.idAcel,
@@ -207,7 +208,7 @@ public final class GestorAlertasSismo {
                 double esperaMs = (System.nanoTime() - esperaInicioNs) / 1_000_000.0;
                 Instant envio = Instant.now();
 
-                RegistroMetricas.escribir("interbloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("CLIENTE_ENTRA_CANAL_ALERTA",
                                 "idEvento=" + idEvento,
                                 "idAcel=" + suscriptor.idAcel,
@@ -219,7 +220,7 @@ public final class GestorAlertasSismo {
                         + ";DURACION_MS:" + duracionMs + ";RETARDO_CLIENTE_MS:" + retardoPorClienteMs
                         + ";SERVIDOR_ENVIO:" + envio);
 
-                RegistroMetricas.escribir("interbloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("ALERTA_ENVIADA_A_CLIENTE",
                                 "idEvento=" + idEvento,
                                 "idAcel=" + suscriptor.idAcel,
@@ -230,13 +231,13 @@ public final class GestorAlertasSismo {
                 Thread.sleep(retardoPorClienteMs);
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
-                RegistroMetricas.escribir("interbloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("ALERTA_INTERRUMPIDA", "idEvento=" + idEvento,
                                 "idAcel=" + suscriptor.idAcel, "detalle=" + ex.getMessage()));
             } finally {
                 if (adquirido) {
                     CANAL_ALERTA.release();
-                    RegistroMetricas.escribir("interbloqueo_sismo.log",
+                    RegistroMetricas.escribir(LOG_SISMO,
                             RegistroMetricas.linea("CLIENTE_LIBERA_CANAL_ALERTA",
                                     "idEvento=" + idEvento,
                                     "idAcel=" + suscriptor.idAcel,
@@ -274,7 +275,7 @@ public final class GestorAlertasSismo {
             int muestra = 1;
             while (System.currentTimeMillis() <= evento.finMs && sismoActivo == evento) {
                 MuestraMovimiento movimiento = calcularMuestra(evento, System.currentTimeMillis());
-                RegistroMetricas.escribir("interbloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("SISMO_MOVIMIENTO_VARIA",
                                 "idEvento=" + evento.idEvento,
                                 "muestra=" + muestra,
@@ -293,7 +294,7 @@ public final class GestorAlertasSismo {
             }
             if (sismoActivo == evento) {
                 sismoActivo = null;
-                RegistroMetricas.escribir("interbloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("SISMO_FINALIZADO", "idEvento=" + evento.idEvento,
                                 "duracionMs=" + (evento.finMs - evento.inicioMs)));
             }

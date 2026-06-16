@@ -10,6 +10,8 @@ import java.time.Instant;
 import telemetria.RegistroMetricas;
 
 public class ClienteConsultaSismoTCP {
+    private static final String LOG_SISMO = "sismo_distribuido.log";
+
     public static void main(String[] args) {
         if (args.length < 3) {
             System.out.println("Uso: java -cp out socket.conconexion.acelerografo.ClienteConsultaSismoTCP <ipServidor> <puerto> <idCliente> [prioridad] [retardoAtencionMs]");
@@ -35,7 +37,7 @@ public class ClienteConsultaSismoTCP {
                     + ";CLIENTE_DETECTA:" + Instant.now();
 
             System.out.println("Movimiento local detectado por " + idCliente + ". Consultando al servidor...");
-            RegistroMetricas.escribir("cliente_consulta_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("CLIENTE_DETECTA_MOVIMIENTO",
                             "idAcel=" + idCliente,
                             "prioridad=" + prioridad,
@@ -47,7 +49,7 @@ public class ClienteConsultaSismoTCP {
             String linea;
             while ((linea = entrada.readLine()) != null) {
                 System.out.println("Servidor -> " + linea);
-                RegistroMetricas.escribir("cliente_consulta_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea(eventoDesdeRespuesta(linea),
                                 "idAcel=" + idCliente,
                                 "prioridad=" + prioridad,
@@ -68,7 +70,7 @@ public class ClienteConsultaSismoTCP {
                 }
             }
         } catch (Exception ex) {
-            RegistroMetricas.escribir("cliente_consulta_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("CLIENTE_CONSULTA_ERROR",
                             "idAcel=" + idCliente,
                             "servidor=" + host + ":" + puerto,

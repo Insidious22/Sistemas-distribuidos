@@ -20,6 +20,7 @@ import java.util.Map;
 import telemetria.RegistroMetricas;
 
 public class EstacionAcelTCP {
+    private static final String LOG_SISMO = "sismo_distribuido.log";
     private static final int PUERTO_DEFECTO = 7500;
     private static final long INTERVALO_DEFECTO_MS = 60000L;
     private static final long INTERVALO_INTERACTIVO_MS = 1000L;
@@ -199,7 +200,7 @@ public class EstacionAcelTCP {
         servidor.prioridadReportada = parsearEntero(extraerCampo(ackHello, "PRIORIDAD",
                 Integer.toString(servidor.prioridadConfigurada)), servidor.prioridadConfigurada);
         System.out.println("Servidor: " + ackHello);
-        RegistroMetricas.escribir("cliente_eleccion.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("COORDINADOR_CONECTADO", "idAcel=" + idAcel,
                         "servidor=" + servidor.etiqueta(),
                         "idServidor=" + servidor.idEfectivo(),
@@ -230,7 +231,7 @@ public class EstacionAcelTCP {
             if (ack.startsWith("ACK_BLOQUEADO;")) {
                 System.out.println("Servidor ocupado para " + lectura.idAcel + " seq=" + lectura.secuencia
                         + ". Lectura queda en cola local.");
-                RegistroMetricas.escribir("cliente_bloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("CLIENTE_BLOQUEADO_POR_SEMAFORO",
                                 "idAcel=" + idAcel,
                                 "seq=" + lectura.secuencia,
@@ -250,6 +251,10 @@ public class EstacionAcelTCP {
                         "motivo=" + extraerCampo(ack, "MOTIVO", "-"),
                         "origen=" + lectura.origen,
                         "pendientes=-",
+                        "prioridadCliente=" + lectura.prioridadCliente,
+                        "distanciaM=" + RegistroMetricas.ms(lectura.distanciaM),
+                        "movimiento=" + lectura.movimiento,
+                        "intensidad=" + RegistroMetricas.ms(lectura.intensidad),
                         "detalle=lectura_no_ingreso_servidor_y_se_guardara_local");
                 return ResultadoEnvio.bloqueado();
             }
@@ -269,7 +274,7 @@ public class EstacionAcelTCP {
                     + ";RED_ESTIMADA_MS:" + RegistroMetricas.ms(redEstimadaMs) + ";IDA_ESTIMADA_MS:"
                     + RegistroMetricas.ms(idaEstimadaMs) + ";VUELTA_ESTIMADA_MS:"
                     + RegistroMetricas.ms(vueltaEstimadaMs));
-            RegistroMetricas.escribir("cliente_tcp_metricas.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_CLIENTE", "idAcel=" + idAcel, "seq=" + lectura.secuencia,
                             "coordinador=" + servidor.etiqueta(), "idServidor=" + servidor.idEfectivo(),
                             "prioridad=" + servidor.prioridadEfectiva(),
@@ -292,9 +297,13 @@ public class EstacionAcelTCP {
                     "rttMs=" + RegistroMetricas.ms(tTxMs),
                     "redMs=" + RegistroMetricas.ms(redEstimadaMs),
                     "origen=" + lectura.origen,
+                    "prioridadCliente=" + lectura.prioridadCliente,
+                    "distanciaM=" + RegistroMetricas.ms(lectura.distanciaM),
+                    "movimiento=" + lectura.movimiento,
+                    "intensidad=" + RegistroMetricas.ms(lectura.intensidad),
                     "detalle=ack_recibido");
             if ("COLA_BLOQUEO".equals(lectura.origen) || "COLA_LOCAL".equals(lectura.origen)) {
-                RegistroMetricas.escribir("cliente_bloqueo_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("COLA_DESBLOQUEADA_ENVIO_OK",
                                 "idAcel=" + idAcel,
                                 "seq=" + lectura.secuencia,
@@ -335,14 +344,14 @@ public class EstacionAcelTCP {
     }
 
     private static void registrarLecturaEncolada(LecturaPendiente lectura, String motivo, int pendientes) {
-        RegistroMetricas.escribir("cliente_eleccion.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("COLA_LOCAL_ENCOLADO", "seq=" + lectura.secuencia,
                         "motivo=" + motivo, "pendientes=" + pendientes,
                         "generadoEn=" + lectura.generadoEn, "payload=" + lectura.payload));
     }
 
     private static void registrarLecturaSincronizada(LecturaPendiente lectura, NodoServidor servidor, int pendientes) {
-        RegistroMetricas.escribir("cliente_eleccion.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("COLA_LOCAL_SINCRONIZADO", "seq=" + lectura.secuencia,
                         "coordinador=" + servidor.etiqueta(), "idServidor=" + servidor.idEfectivo(),
                         "prioridad=" + servidor.prioridadEfectiva(), "pendientes=" + pendientes,
@@ -365,7 +374,7 @@ public class EstacionAcelTCP {
             }
         }
 
-        RegistroMetricas.escribir("cliente_eleccion.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 tablaEleccion(idAcel, motivo, secuencia, ronda, resultados, ganador));
 
         if (ganador != null) {
@@ -414,7 +423,7 @@ public class EstacionAcelTCP {
             Exception ex) {
         String etiqueta = servidor == null ? "SIN_COORDINADOR" : servidor.etiqueta();
         System.out.println("Fallo con coordinador " + etiqueta + ". Iniciando eleccion...");
-        RegistroMetricas.escribir("cliente_eleccion.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("FALLO_COORDINADOR", "idAcel=" + idAcel, "fase=" + fase,
                         "seq=" + secuencia, "coordinador=" + etiqueta,
                         "error=" + ex.getClass().getSimpleName(), "detalle=" + ex.getMessage()));
@@ -436,7 +445,7 @@ public class EstacionAcelTCP {
             int secuencia) {
         System.out.println("Servidor de mayor prioridad recuperado. Migrando de " + anterior.etiqueta()
                 + " a " + nuevo.etiqueta());
-        RegistroMetricas.escribir("cliente_eleccion.log",
+        RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("MIGRACION_COORDINADOR_RECUPERADO", "idAcel=" + idAcel,
                         "seq=" + secuencia,
                         "anterior=" + anterior.etiqueta(),
@@ -633,6 +642,7 @@ public class EstacionAcelTCP {
         System.out.println("  java -cp out socket.conconexion.acelerografo.EstacionAcelTCP <ipA:puerto,ipB:puerto,ipC:puerto> [puertoDefecto] [idAcel] [intervaloMs] [repeticiones] [duracionSegundos]");
         System.out.println("Uso con sismo/concurrencia:");
         System.out.println("  java -cp out socket.conconexion.acelerografo.EstacionAcelTCP <servidores> [puerto] [idAcel] [intervaloMs] [repeticiones] [duracionSegundos] [prioridadCliente] [distanciaM] [duracionSismoSegundos]");
+        System.out.println("  Para cliente permanente use duracionSegundos=0. duracionSismoSegundos solo controla cuanto dura la variacion del sismo.");
         System.out.println("Sin argumentos, el cliente pide datos basicos y queda permanente hasta Ctrl + C.");
     }
 

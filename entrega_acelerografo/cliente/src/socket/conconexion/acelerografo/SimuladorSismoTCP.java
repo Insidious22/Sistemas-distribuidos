@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import telemetria.RegistroMetricas;
 
 public class SimuladorSismoTCP {
+    private static final String LOG_SISMO = "sismo_distribuido.log";
+
     public static void main(String[] args) {
         if (args.length < 4) {
             System.out.println("Uso: java -cp out socket.conconexion.acelerografo.SimuladorSismoTCP <ipServidor> <puerto> <idEvento> <duracionMs> [retardoClienteMs]");
@@ -32,14 +34,14 @@ public class SimuladorSismoTCP {
             salida.println(comando);
             String ack = entrada.readLine();
             System.out.println("Servidor: " + ack);
-            RegistroMetricas.escribir("simulador_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("SISMO_SOLICITADO", "servidor=" + host + ":" + puerto,
                             "idEvento=" + idEvento,
                             "duracionMs=" + duracionMs,
                             "retardoClienteMs=" + retardoClienteMs,
                             "ack=" + ack));
         } catch (Exception ex) {
-            RegistroMetricas.escribir("simulador_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("SISMO_SIMULADOR_ERROR", "servidor=" + host + ":" + puerto,
                             "idEvento=" + idEvento,
                             "error=" + ex.getClass().getSimpleName(), "detalle=" + ex.getMessage()));

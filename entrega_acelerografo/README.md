@@ -109,40 +109,40 @@ Cuando vuelve un servidor, sincroniza la cola pendiente en orden por `SEQ`.
 
 ## Logs
 
-Ver monitor global desde cualquier servidor:
+La evidencia principal queda concentrada en un solo archivo:
 
 ```powershell
-Get-Content logs\monitor_global_clientes.log -Tail 120
+Get-Content logs\sismo_distribuido.log -Tail 220
 ```
 
-Buscar los tres clientes:
+Buscar clientes especificos:
 
 ```powershell
-Select-String logs\monitor_global_clientes.log -Pattern "EC-UNO|EC-DOS|EC-TRES"
+Select-String logs\sismo_distribuido.log -Pattern "EC-UNO|EC-DOS|EC-TRES|EC-CUATRO"
 ```
 
-Logs principales:
+Buscar bloqueos y sincronizacion:
+
+```powershell
+Select-String logs\sismo_distribuido.log -Pattern "BLOQUEADO|COLA|SINCRONIZADO|PERMISO"
+```
+
+Archivos usados:
 
 ```text
-logs\monitor_global_clientes.log  eventos de todos los clientes replicados a los servidores vivos
-logs\cliente_eleccion.log         eleccion, migracion, cola local del cliente
-logs\cliente_tcp_metricas.log     RTT, red estimada, ida, vuelta del cliente
-logs\cliente_bloqueo_sismo.log    bloqueo por semaforo, cola local y sincronizacion posterior
-logs\servidor_tcp_metricas.log    lecturas recibidas por servidor
-logs\servidor_tcp_resumen.log     promedios por cliente
-logs\servidor_eleccion.log        pings de eleccion recibidos por servidor
-logs\concurrencia_sismica.log     semaforo y region critica
-bitacora_sismica.txt              lecturas escritas dentro de la region critica
+logs\sismo_distribuido.log  log principal en tablas: cliente, servidor, semaforo, cola, eleccion y metricas
+bitacora_sismica.txt        lecturas aceptadas dentro de la region critica
 ```
 
-Los logs nuevos se escriben en bloques tipo tabla ASCII.
+El log principal se escribe en bloques tipo tabla ASCII para que se pueda leer como evidencia.
 
-## Prueba principal: sismo con 4 clientes, 2 admitidos y 2 bloqueados
+## Prueba principal: clientes permanentes, sismo de 10 segundos
 
 Esta es la prueba recomendada para la evidencia. Los clientes son estaciones persistentes.
 Todos generan lecturas. Los mas cercanos al evento tienen mayor prioridad y variacion mas fuerte.
 El servidor se levanta con 2 permisos, por eso solo 2 clientes pueden entrar a la zona critica al mismo tiempo.
 Los demas reciben `ACK_BLOQUEADO`, guardan la lectura en cola local, siguen generando nuevas lecturas y luego sincronizan la cola cuando se desbloquean.
+El sismo dura 10 segundos, pero los clientes no se cierran solos: siguen conectados y enviando cada 1 segundo hasta que se detengan manualmente con Ctrl + C.
 
 Levantar un solo servidor activo con 2 permisos y zona critica de 5 segundos:
 
@@ -163,25 +163,25 @@ SERV-A id del servidor
 Cliente cercano 1, prioridad alta:
 
 ```powershell
-java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23:7500 7500 EC-UNO 500 0 10 1 10 10
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23:7500 7500 EC-UNO 1000 0 0 1 10 10
 ```
 
 Cliente cercano 2, prioridad alta:
 
 ```powershell
-java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23:7500 7500 EC-DOS 500 0 10 2 18 10
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23:7500 7500 EC-DOS 1000 0 0 2 18 10
 ```
 
 Cliente lejano 3, menor prioridad:
 
 ```powershell
-java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23:7500 7500 EC-TRES 500 0 10 3 42 10
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23:7500 7500 EC-TRES 1000 0 0 3 42 10
 ```
 
 Cliente lejano 4, menor prioridad:
 
 ```powershell
-java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23:7500 7500 EC-CUATRO 500 0 10 4 55 10
+java -cp out socket.conconexion.acelerografo.EstacionAcelTCP 192.16.108.23:7500 7500 EC-CUATRO 1000 0 0 4 55 10
 ```
 
 Parametros nuevos del cliente:
@@ -190,12 +190,12 @@ Parametros nuevos del cliente:
 192.16.108.23:7500  servidor o lista de servidores
 7500                 puerto por defecto
 EC-UNO               id del acelerografo
-500                  intervalo entre lecturas en ms
+1000                 intervalo entre lecturas en ms
 0                    repeticiones, 0 significa sin limite por cantidad
-10                   duracion total de la prueba en segundos
+0                    duracion total del cliente, 0 significa permanente hasta Ctrl + C
 1                    prioridad del cliente, 1 es la mas alta
 10                   distancia al evento en metros
-10                   duracion del sismo local en segundos
+10                   duracion del sismo local en segundos; al terminar, el cliente sigue vivo
 ```
 
 Resultado esperado:
@@ -206,14 +206,13 @@ EC-TRES y EC-CUATRO intentan enviar, reciben ACK_BLOQUEADO y encolan localmente.
 Mientras siguen bloqueados, continuan generando lecturas y crece la cola.
 Cuando el semaforo libera permisos, sincronizan primero la cola pendiente.
 Despues de vaciar la cola, vuelven a enviar en tiempo real.
+Cuando pasan los 10 segundos de sismo, los clientes siguen conectados y enviando lecturas normales.
 ```
 
-Logs para evidenciarlo:
+Log para evidenciarlo:
 
 ```powershell
-Get-Content logs\cliente_bloqueo_sismo.log -Tail 180
-Get-Content logs\concurrencia_sismica.log -Tail 180
-Get-Content logs\servidor_tcp_metricas.log -Tail 180
+Get-Content logs\sismo_distribuido.log -Tail 220
 ```
 
 Eventos clave:
@@ -290,13 +289,7 @@ SISMO-001      id del evento
 Ver el log de la prueba:
 
 ```powershell
-Get-Content logs\interbloqueo_sismo.log -Tail 160
-```
-
-Ver lo que recibieron los clientes de consulta:
-
-```powershell
-Get-Content logs\cliente_consulta_sismo.log -Tail 120
+Get-Content logs\sismo_distribuido.log -Tail 160
 ```
 
 Eventos importantes:

@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import telemetria.RegistroMetricas;
 
 public class ClienteAlertaSismoTCP {
+    private static final String LOG_SISMO = "sismo_distribuido.log";
     private static final int PUERTO_DEFECTO = 7500;
 
     public static void main(String[] args) {
@@ -30,7 +31,7 @@ public class ClienteAlertaSismoTCP {
             salida.println("SUSCRIBIR_ALERTAS;ID_ACEL:" + idCliente);
             String ack = entrada.readLine();
             System.out.println("Servidor: " + ack);
-            RegistroMetricas.escribir("cliente_alertas_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("CLIENTE_ALERTA_CONECTADO", "idAcel=" + idCliente,
                             "servidor=" + host + ":" + puerto, "ack=" + ack));
 
@@ -38,7 +39,7 @@ public class ClienteAlertaSismoTCP {
             String linea;
             while ((linea = entrada.readLine()) != null) {
                 System.out.println("ALERTA RECIBIDA -> " + linea);
-                RegistroMetricas.escribir("cliente_alertas_sismo.log",
+                RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("ALERTA_SISMO_RECIBIDA", "idAcel=" + idCliente,
                                 "servidor=" + host + ":" + puerto,
                                 "idEvento=" + extraerCampo(linea, "ID_EVENTO", "-"),
@@ -48,7 +49,7 @@ public class ClienteAlertaSismoTCP {
                                 "payload=" + linea));
             }
         } catch (Exception ex) {
-            RegistroMetricas.escribir("cliente_alertas_sismo.log",
+            RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("CLIENTE_ALERTA_ERROR", "idAcel=" + idCliente,
                             "servidor=" + host + ":" + puerto,
                             "error=" + ex.getClass().getSimpleName(), "detalle=" + ex.getMessage()));

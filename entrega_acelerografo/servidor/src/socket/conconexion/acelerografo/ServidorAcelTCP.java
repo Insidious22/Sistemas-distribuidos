@@ -6,6 +6,7 @@ import java.net.Socket;
 import telemetria.RegistroMetricas;
 
 public class ServidorAcelTCP {
+    private static final String LOG_SISMO = "sismo_distribuido.log";
     private static final int PUERTO_DEFECTO = 7500;
     private static final int PERMISOS_DEFECTO = 3;
     private static final String ID_SERVIDOR_DEFECTO = "SERVIDOR-ACEL";
@@ -35,7 +36,7 @@ public class ServidorAcelTCP {
                     System.out.println("Conexion TCP aceptada desde " + socketCliente.getRemoteSocketAddress());
                     Thread hilo = new Thread(new HiloDespachador(socketCliente), "hilo-acel-" + socketCliente.getPort());
                     hilo.setUncaughtExceptionHandler((thread, error) -> {
-                        RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                        RegistroMetricas.escribir(LOG_SISMO,
                                 RegistroMetricas.linea("TCP_HILO_ERROR_NO_CONTROLADO", "hilo=" + thread.getName(),
                                         "error=" + error.getClass().getSimpleName(),
                                         "detalle=" + error.getMessage()));
@@ -44,7 +45,7 @@ public class ServidorAcelTCP {
                     });
                     hilo.start();
                 } catch (IOException ex) {
-                    RegistroMetricas.escribir("servidor_tcp_metricas.log",
+                    RegistroMetricas.escribir(LOG_SISMO,
                             RegistroMetricas.linea("TCP_ACCEPT_ERROR", "error=" + ex.getClass().getSimpleName(),
                                     "detalle=" + ex.getMessage()));
                     System.out.println("No se pudo aceptar una conexion. El servidor seguira escuchando.");
