@@ -52,6 +52,28 @@ public final class GestorAlertasSismo {
         }
     }
 
+    public static String estadoSismoParaLectura(String idAcel, int prioridad, double distanciaM) {
+        MuestraMovimiento muestra = muestraActual();
+        double atenuacion = atenuacionPorDistancia(distanciaM);
+        double xG = muestra.activo ? 0.020 + ((muestra.xG - 0.020) * atenuacion) : 0.020;
+        double yG = muestra.activo ? -0.010 + ((muestra.yG + 0.010) * atenuacion) : -0.010;
+        double zG = muestra.activo ? 0.980 + ((muestra.zG - 0.980) * atenuacion) : 0.980;
+        double intensidad = Math.sqrt((xG * xG) + (yG * yG) + ((zG - 0.980) * (zG - 0.980)));
+        boolean movimiento = muestra.activo && intensidad >= 0.035;
+
+        return "ESTADO_SISMO_ACK;ID_ACEL:" + idAcel
+                + ";PRIORIDAD:" + prioridad
+                + ";DISTANCIA_M:" + formato(distanciaM)
+                + ";MOVIMIENTO:" + (movimiento ? "SI" : "NO")
+                + ";ID_EVENTO:" + muestra.idEvento
+                + ";EJE_X:" + formatoConG(xG)
+                + ";EJE_Y:" + formatoConG(yG)
+                + ";EJE_Z:" + formatoConG(zG)
+                + ";INTENSIDAD:" + formato(intensidad)
+                + ";DURACION_RESTANTE_MS:" + muestra.restanteMs
+                + ";SERVIDOR_RESPUESTA:" + Instant.now();
+    }
+
     public static void consultarMovimiento(String idAcel, int prioridad, String remoto, PrintWriter salida,
             long retardoAtencionMs) throws InterruptedException {
         long inicioEsperaNs = System.nanoTime();
@@ -175,6 +197,14 @@ public final class GestorAlertasSismo {
 
     private static String formato(double valor) {
         return String.format(Locale.US, "%.3f", valor);
+    }
+
+    private static String formatoConG(double valor) {
+        return String.format(Locale.US, "%+.3fG", valor);
+    }
+
+    private static double atenuacionPorDistancia(double distanciaM) {
+        return Math.max(0.10, Math.min(1.0, (60.0 - distanciaM) / 60.0));
     }
 
     private static final class NotificadorAlerta implements Runnable {

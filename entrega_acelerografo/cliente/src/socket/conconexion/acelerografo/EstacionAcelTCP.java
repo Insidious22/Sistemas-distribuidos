@@ -2,6 +2,7 @@ package socket.conconexion.acelerografo;
 
 import java.io.BufferedReader;
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
@@ -9,6 +10,7 @@ import java.io.PrintWriter;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -70,7 +72,7 @@ public class EstacionAcelTCP {
                 if (coordinador == null) {
                     if (puedeGenerar(indice, repeticiones, finNs)) {
                         LecturaPendiente lectura = crearLecturaPendiente(idAcel, indice, perfilSismo,
-                                "COLA_LOCAL", pendientes.size());
+                                "COLA_LOCAL", pendientes.size(), null);
                         pendientes.add(lectura);
                         indice++;
                         registrarLecturaEncolada(lectura, "SIN_COORDINADOR", pendientes.size());
@@ -102,7 +104,7 @@ public class EstacionAcelTCP {
                         LecturaPendiente lectura = sincronizandoPendiente
                                 ? pendientes.peek()
                                 : crearLecturaPendiente(idAcel, indice, perfilSismo, "TIEMPO_REAL",
-                                        pendientes.size());
+                                        pendientes.size(), null);
                         ResultadoEnvio resultado = enviarLectura(conexion, coordinador, idAcel, lectura,
                                 servidores);
                         if (resultado.esFallo()) {
@@ -129,7 +131,7 @@ public class EstacionAcelTCP {
                                         "detalle=cliente_sigue_generando_mientras_espera");
                             } else if (puedeGenerar(indice, repeticiones, finNs)) {
                                 LecturaPendiente nuevaLocal = crearLecturaPendiente(idAcel, indice, perfilSismo,
-                                        "COLA_BLOQUEO", pendientes.size() + 1);
+                                        "COLA_BLOQUEO", pendientes.size() + 1, null);
                                 pendientes.add(nuevaLocal);
                                 indice++;
                                 registrarLecturaEncolada(nuevaLocal, "BLOQUEO_SEMAFORO_CONTINUA_GENERANDO",
@@ -324,18 +326,86 @@ public class EstacionAcelTCP {
     }
 
     private static LecturaPendiente crearLecturaPendiente(String idAcel, int indice, PerfilSismo perfil,
-            String origen, int pendientesCliente) {
-        MuestraLocal muestra = perfil.muestra(indice);
+            String origen, int pendientesCliente, EstadoSismoManual estadoManual) {
+        EstadoSismoManual sismoManual = SismoManualLocal.leer(perfil);
+        MuestraLocal muestra = sismoManual != null && sismoManual.activo
+                ? sismoManual.muestra()
+                : (estadoManual != null && estadoManual.activo ? estadoManual.muestra() : perfil.muestra(indice));
+        String idEvento = sismoManual != null ? sismoManual.idEvento : (estadoManual == null ? "-" : estadoManual.idEvento);
         int secuencia = indice + 1;
         String payload = "SEQ:" + secuencia + ";" + LecturaTriaxial.crearPayload(idAcel, muestra.x, muestra.y,
                 muestra.z) + ";PRIORIDAD_CLIENTE:" + perfil.prioridadCliente
                 + ";DISTANCIA_M:" + RegistroMetricas.ms(perfil.distanciaM)
                 + ";MOVIMIENTO:" + (muestra.movimiento ? "SI" : "NO")
                 + ";INTENSIDAD:" + RegistroMetricas.ms(muestra.intensidad)
+                + ";EVENTO_SISMO:" + idEvento
                 + ";ORIGEN:" + origen
                 + ";PENDIENTES_CLIENTE:" + pendientesCliente;
         return new LecturaPendiente(secuencia, idAcel, payload, Instant.now(), origen, perfil.prioridadCliente,
                 perfil.distanciaM, muestra.intensidad, muestra.movimiento, perfil.retardoPrioridadMs());
+    }
+
+    private static final class SismoManualLocal {
+        private static final File ARCHIVO = new File("sismo_manual.txt");
+
+        private static EstadoSismoManual leer(PerfilSismo perfil) {
+            if (!ARCHIVO.isFile()) {
+                return null;
+            }
+            try {
+                List<String> lineas = Files.readAllLines(ARCHIVO.toPath(), StandardCharsets.UTF_8);
+                Map<String, String> campos = new HashMap<String, String>();
+                for (String linea : lineas) {
+                    int separador = linea.indexOf('=');
+                    if (separador > 0) {
+                        campos.put(linea.substring(0, separador).trim().toUpperCase(Locale.US),
+                                linea.substring(separador + 1).trim());
+                    }
+                }
+                String idEvento = valor(campos, "ID_EVENTO", "SISMO-MANUAL");
+                long inicioMs = Long.parseLong(valor(campos, "INICIO_MS", "0"));
+                long duracionMs = Long.parseLong(valor(campos, "DURACION_MS", "0"));
+                long ahoraMs = System.currentTimeMillis();
+                if (inicioMs <= 0 || duracionMs <= 0 || ahoraMs > inicioMs + duracionMs) {
+                    return null;
+                }
+                long transcurridoMs = Math.max(0L, ahoraMs - inicioMs);
+                double segundo = transcurridoMs / 1000.0;
+                double cercania = Math.max(0.10, Math.min(1.0, (60.0 - perfil.distanciaM) / 60.0));
+                double amplitud = 0.100 * cercania;
+                double fase = segundo + perfil.prioridadCliente;
+                double x = 0.020 + Math.sin(fase * 1.20) * amplitud;
+                double y = -0.010 + Math.cos(fase * 0.95) * amplitud;
+                double z = 0.980 + Math.sin(fase * 0.75) * amplitud;
+                double intensidad = Math.sqrt((x * x) + (y * y) + ((z - 0.980) * (z - 0.980)));
+                boolean movimiento = intensidad >= 0.035;
+                return new EstadoSismoManual(movimiento, idEvento, x, y, z, intensidad);
+            } catch (Exception ex) {
+                return null;
+            }
+        }
+
+        private static String valor(Map<String, String> campos, String clave, String defecto) {
+            String valor = campos.get(clave);
+            return valor == null || valor.trim().isEmpty() ? defecto : valor.trim();
+        }
+    }
+
+    private static EstadoSismoManual consultarEstadoSismo(ConexionServidor conexion, String idAcel,
+            PerfilSismo perfil) {
+        try {
+            conexion.salida.println("ESTADO_SISMO;ID_ACEL:" + idAcel
+                    + ";PRIORIDAD:" + perfil.prioridadCliente
+                    + ";DISTANCIA_M:" + RegistroMetricas.ms(perfil.distanciaM)
+                    + ";CLIENTE_TS:" + Instant.now());
+            String respuesta = conexion.entrada.readLine();
+            if (respuesta == null || !respuesta.startsWith("ESTADO_SISMO_ACK;")) {
+                return null;
+            }
+            return EstadoSismoManual.desdeRespuesta(respuesta);
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     private static boolean puedeGenerar(int indice, int repeticiones, long finNs) {
@@ -783,8 +853,8 @@ public class EstacionAcelTCP {
         }
 
         private MuestraLocal muestra(int indice) {
-            boolean eventoActivo = duracionSismoSegundos <= 0
-                    || System.nanoTime() - inicioNs <= duracionSismoSegundos * 1_000_000_000L;
+            boolean eventoActivo = duracionSismoSegundos > 0
+                    && System.nanoTime() - inicioNs <= duracionSismoSegundos * 1_000_000_000L;
             double cercania = Math.max(0.05, Math.min(1.0, (45.0 - distanciaM) / 45.0));
             double fase = indice + prioridadCliente;
             double amplitud = eventoActivo ? cercania * 0.090 : 0.005;
@@ -814,6 +884,46 @@ public class EstacionAcelTCP {
             this.z = z;
             this.intensidad = intensidad;
             this.movimiento = movimiento;
+        }
+    }
+
+    private static final class EstadoSismoManual {
+        private final boolean activo;
+        private final String idEvento;
+        private final double x;
+        private final double y;
+        private final double z;
+        private final double intensidad;
+
+        private EstadoSismoManual(boolean activo, String idEvento, double x, double y, double z, double intensidad) {
+            this.activo = activo;
+            this.idEvento = idEvento;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.intensidad = intensidad;
+        }
+
+        private static EstadoSismoManual desdeRespuesta(String respuesta) {
+            boolean activo = "SI".equalsIgnoreCase(extraerCampo(respuesta, "MOVIMIENTO", "NO"));
+            String idEvento = extraerCampo(respuesta, "ID_EVENTO", "-");
+            double x = leerGravedad(extraerCampo(respuesta, "EJE_X", "+0.020G"));
+            double y = leerGravedad(extraerCampo(respuesta, "EJE_Y", "-0.010G"));
+            double z = leerGravedad(extraerCampo(respuesta, "EJE_Z", "+0.980G"));
+            double intensidad = Double.parseDouble(extraerCampo(respuesta, "INTENSIDAD", "0"));
+            return new EstadoSismoManual(activo, idEvento, x, y, z, intensidad);
+        }
+
+        private MuestraLocal muestra() {
+            return new MuestraLocal(x, y, z, intensidad, activo);
+        }
+
+        private static double leerGravedad(String valor) {
+            String normalizado = valor.trim().toUpperCase(Locale.US);
+            if (normalizado.endsWith("G")) {
+                normalizado = normalizado.substring(0, normalizado.length() - 1);
+            }
+            return Double.parseDouble(normalizado);
         }
     }
 

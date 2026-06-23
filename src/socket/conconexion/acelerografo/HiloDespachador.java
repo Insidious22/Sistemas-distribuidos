@@ -151,6 +151,14 @@ public class HiloDespachador implements Runnable {
                     continue;
                 }
 
+                if (linea.startsWith("ESTADO_SISMO;")) {
+                    String idAcel = extraerCampo(linea, "ID_ACEL", idSesion);
+                    int prioridadCliente = Integer.parseInt(extraerCampo(linea, "PRIORIDAD", "9"));
+                    double distanciaM = Double.parseDouble(extraerCampo(linea, "DISTANCIA_M", "99"));
+                    salida.println(GestorAlertasSismo.estadoSismoParaLectura(idAcel, prioridadCliente, distanciaM));
+                    continue;
+                }
+
                 if (linea.startsWith("CONSULTAR_SISMO;")) {
                     idSesion = extraerCampo(linea, "ID_ACEL", idSesion);
                     clienteRemoto = direccionRemota(cliente);
