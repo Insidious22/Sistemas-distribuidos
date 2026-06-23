@@ -418,7 +418,12 @@ public class HiloDespachador implements Runnable {
             Instant servidorRecibido, double procesamientoMs, double esperaMs) {
         String idAcel = lectura.getIdAcel();
         String movimiento = extraerCampo(payload, "MOVIMIENTO", "-");
+        if (!"RECIBIDO".equals(estado) || !"SI".equals(movimiento)) {
+            return;
+        }
         String intensidad = extraerCampo(payload, "INTENSIDAD", "-");
+        String magnitud = extraerCampo(payload, "MAGNITUD", "-");
+        String direccion = extraerCampo(payload, "DIRECCION", "-");
         String ejeX = extraerCampo(payload, "EJE_X", "-");
         String ejeY = extraerCampo(payload, "EJE_Y", "-");
         String ejeZ = extraerCampo(payload, "EJE_Z", "-");
@@ -432,12 +437,12 @@ public class HiloDespachador implements Runnable {
         }
 
         System.out.printf(Locale.US,
-                "%s | %-9s | %-8s seq=%s mov=%s int=%s x=%s y=%s z=%s origen=%s pend=%s envioCada=%s llegaCada=%s proc=%s ms espera=%s ms%n",
+                "%s | SISMO RECIBIDO | %-8s seq=%s mag=%s dir=%s int=%s x=%s y=%s z=%s origen=%s pend=%s envioCada=%s llegaCada=%s proc=%s ms%n",
                 hora,
-                estado,
                 idAcel,
                 seq,
-                movimiento,
+                magnitud,
+                direccion,
                 intensidad,
                 ejeX,
                 ejeY,
@@ -446,8 +451,7 @@ public class HiloDespachador implements Runnable {
                 pendientes,
                 intervaloEnvio,
                 intervaloLlegada,
-                RegistroMetricas.ms(procesamientoMs),
-                RegistroMetricas.ms(esperaMs));
+                RegistroMetricas.ms(procesamientoMs));
     }
 
     private static String calcularIntervaloEnvio(String idAcel, String timestampTexto) {

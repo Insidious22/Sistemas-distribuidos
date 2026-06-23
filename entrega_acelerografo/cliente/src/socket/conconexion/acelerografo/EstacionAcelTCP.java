@@ -7,10 +7,10 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.nio.file.Files;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
-import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -231,8 +231,9 @@ public class EstacionAcelTCP {
             Instant clienteAck = Instant.now();
             double tTxMs = (tiempoFinal - tiempoInicial) / 1_000_000.0;
             if (ack.startsWith("ACK_BLOQUEADO;")) {
-                System.out.println("Servidor ocupado para " + lectura.idAcel + " seq=" + lectura.secuencia
-                        + ". Lectura queda en cola local.");
+                if ("SI".equals(lectura.movimiento)) {
+                    imprimirEstadoCliente("NO PUEDE ENVIAR - ENCOLADO", lectura, servidor, tTxMs);
+                }
                 RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.linea("CLIENTE_BLOQUEADO_POR_SEMAFORO",
                                 "idAcel=" + idAcel,
@@ -266,11 +267,9 @@ public class EstacionAcelTCP {
             double idaEstimadaMs = redEstimadaMs / 2.0;
             double vueltaEstimadaMs = redEstimadaMs / 2.0;
 
-            System.out.println("ACK recibido desde " + servidor.etiqueta() + ": " + ack);
-            System.out.printf(Locale.US, "[METRICA TCP] Registro enviado en: %.4f ms.%n", tTxMs);
-            System.out.printf(Locale.US,
-                    "[DESGLOSE TCP] servidor=%s | servidorProc=%.4f ms | redEstimada=%.4f ms | idaEstimada=%.4f ms | vueltaEstimada=%.4f ms%n",
-                    servidor.idEfectivo(), servidorProcMs, redEstimadaMs, idaEstimadaMs, vueltaEstimadaMs);
+            if ("SI".equals(lectura.movimiento)) {
+                imprimirEstadoCliente("ENVIANDO SISMO", lectura, servidor, tTxMs);
+            }
             conexion.salida.println("METRICA_TCP;ID_ACEL:" + idAcel + ";SEQ:" + lectura.secuencia + ";RTT_MS:"
                     + RegistroMetricas.ms(tTxMs) + ";SERVIDOR_PROC_MS:" + RegistroMetricas.ms(servidorProcMs)
                     + ";RED_ESTIMADA_MS:" + RegistroMetricas.ms(redEstimadaMs) + ";IDA_ESTIMADA_MS:"
@@ -325,6 +324,24 @@ public class EstacionAcelTCP {
         }
     }
 
+    private static void imprimirEstadoCliente(String estado, LecturaPendiente lectura, NodoServidor servidor,
+            double tTxMs) {
+        System.out.printf(Locale.US,
+                "%s | %s seq=%d mag=%s dir=%s int=%s x=%s y=%s z=%s servidor=%s cola=%s rtt=%s ms%n",
+                estado,
+                lectura.idAcel,
+                lectura.secuencia,
+                extraerCampo(lectura.payload, "MAGNITUD", "-"),
+                extraerCampo(lectura.payload, "DIRECCION", "-"),
+                RegistroMetricas.ms(lectura.intensidad),
+                extraerCampo(lectura.payload, "EJE_X", "-"),
+                extraerCampo(lectura.payload, "EJE_Y", "-"),
+                extraerCampo(lectura.payload, "EJE_Z", "-"),
+                servidor.etiqueta(),
+                extraerCampo(lectura.payload, "PENDIENTES_CLIENTE", "0"),
+                RegistroMetricas.ms(tTxMs));
+    }
+
     private static LecturaPendiente crearLecturaPendiente(String idAcel, int indice, PerfilSismo perfil,
             String origen, int pendientesCliente, EstadoSismoManual estadoManual) {
         EstadoSismoManual sismoManual = SismoManualLocal.leer(perfil);
@@ -332,17 +349,32 @@ public class EstacionAcelTCP {
                 ? sismoManual.muestra()
                 : (estadoManual != null && estadoManual.activo ? estadoManual.muestra() : perfil.muestra(indice));
         String idEvento = sismoManual != null ? sismoManual.idEvento : (estadoManual == null ? "-" : estadoManual.idEvento);
+        String magnitud = magnitudSismica(muestra.intensidad);
+        String direccion = direccionMovimiento(muestra.x, muestra.y);
         int secuencia = indice + 1;
         String payload = "SEQ:" + secuencia + ";" + LecturaTriaxial.crearPayload(idAcel, muestra.x, muestra.y,
                 muestra.z) + ";PRIORIDAD_CLIENTE:" + perfil.prioridadCliente
                 + ";DISTANCIA_M:" + RegistroMetricas.ms(perfil.distanciaM)
                 + ";MOVIMIENTO:" + (muestra.movimiento ? "SI" : "NO")
                 + ";INTENSIDAD:" + RegistroMetricas.ms(muestra.intensidad)
+                + ";MAGNITUD:" + magnitud
+                + ";DIRECCION:" + direccion
                 + ";EVENTO_SISMO:" + idEvento
                 + ";ORIGEN:" + origen
                 + ";PENDIENTES_CLIENTE:" + pendientesCliente;
         return new LecturaPendiente(secuencia, idAcel, payload, Instant.now(), origen, perfil.prioridadCliente,
                 perfil.distanciaM, muestra.intensidad, muestra.movimiento, perfil.retardoPrioridadMs());
+    }
+
+    private static String magnitudSismica(double intensidad) {
+        double magnitud = Math.min(8.5, Math.max(0.0, 2.5 + (intensidad * 35.0)));
+        return RegistroMetricas.ms(magnitud);
+    }
+
+    private static String direccionMovimiento(double x, double y) {
+        String norteSur = y >= 0 ? "NORTE" : "SUR";
+        String esteOeste = x >= 0 ? "ESTE" : "OESTE";
+        return norteSur + "-" + esteOeste;
     }
 
     private static final class SismoManualLocal {
@@ -378,7 +410,7 @@ public class EstacionAcelTCP {
                 double y = -0.010 + Math.cos(fase * 0.95) * amplitud;
                 double z = 0.980 + Math.sin(fase * 0.75) * amplitud;
                 double intensidad = Math.sqrt((x * x) + (y * y) + ((z - 0.980) * (z - 0.980)));
-                boolean movimiento = intensidad >= 0.035;
+                boolean movimiento = true;
                 return new EstadoSismoManual(movimiento, idEvento, x, y, z, intensidad);
             } catch (Exception ex) {
                 return null;
