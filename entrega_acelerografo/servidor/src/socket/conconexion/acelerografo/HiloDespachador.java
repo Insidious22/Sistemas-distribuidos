@@ -223,6 +223,22 @@ public class HiloDespachador implements Runnable {
                             "origen=" + extraerCampo(payload, "ORIGEN", "-"),
                             "payload=" + payload,
                             estadisticas.resumen()));
+            RegistroMetricas.escribir(LOG_SISMO,
+                    RegistroMetricas.linea("TCP_CONEXION_RECHAZADA_POR_OCUPACION",
+                            "idAcel=" + lectura.getIdAcel(),
+                            "seq=" + seq,
+                            "cliente=" + direccionRemota(cliente),
+                            "accion=cliente_debe_encolar_localmente_y_reconectar"));
+            try {
+                cliente.close();
+            } catch (IOException ex) {
+                RegistroMetricas.escribir(LOG_SISMO,
+                        RegistroMetricas.linea("TCP_CIERRE_TRAS_BLOQUEO_ERROR",
+                                "idAcel=" + lectura.getIdAcel(),
+                                "seq=" + seq,
+                                "error=" + ex.getClass().getSimpleName(),
+                                "detalle=" + ex.getMessage()));
+            }
             return;
         }
 

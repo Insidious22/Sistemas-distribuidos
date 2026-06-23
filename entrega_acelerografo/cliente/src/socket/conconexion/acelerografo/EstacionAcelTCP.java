@@ -140,7 +140,7 @@ public class EstacionAcelTCP {
                                         "detalle=lectura_generada_mientras_otro_cliente_ocupa_servidor");
                             }
                             esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
-                            continue;
+                            break;
                         }
                         if (sincronizandoPendiente) {
                             pendientes.remove();

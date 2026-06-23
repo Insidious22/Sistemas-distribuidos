@@ -140,21 +140,21 @@ El log principal se escribe en bloques tipo tabla ASCII para que se pueda leer c
 
 Esta es la prueba recomendada para la evidencia. Los clientes son estaciones persistentes.
 Todos generan lecturas. Los mas cercanos al evento tienen mayor prioridad y variacion mas fuerte.
-El servidor se levanta con 2 permisos, por eso solo 2 clientes pueden entrar a la zona critica al mismo tiempo.
-Los demas reciben `ACK_BLOQUEADO`, guardan la lectura en cola local, siguen generando nuevas lecturas y luego sincronizan la cola cuando se desbloquean.
+El servidor se levanta con 1 permiso, por eso solo 1 cliente puede comunicarse con el servidor a la vez.
+Los demas reciben `ACK_BLOQUEADO`, el servidor cierra esa conexion, el cliente guarda la lectura en cola local, sigue generando nuevas lecturas y luego reconecta para sincronizar la cola cuando el servidor queda libre.
 El sismo dura 10 segundos, pero los clientes no se cierran solos: siguen conectados y enviando cada 1 segundo hasta que se detengan manualmente con Ctrl + C.
 
-Levantar un solo servidor activo con 2 permisos y zona critica de 5 segundos:
+Levantar un solo servidor activo con 1 permiso y zona critica de 5 segundos:
 
 ```powershell
-java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500 2 SERV-A 3 5000
+java -cp out socket.conconexion.acelerografo.ServidorAcelTCP 7500 1 SERV-A 3 5000
 ```
 
 Parametros nuevos del servidor:
 
 ```text
 7500  puerto
-2     permisos del semaforo, permite 2 clientes simultaneos
+1     permisos del semaforo, permite 1 cliente comunicandose con el servidor
 SERV-A id del servidor
 3     prioridad del servidor para eleccion
 5000  retardo en ms dentro de la region critica
@@ -201,10 +201,10 @@ EC-UNO               id del acelerografo
 Resultado esperado:
 
 ```text
-EC-UNO y EC-DOS tienen prioridad/distancia favorable y entran primero.
-EC-TRES y EC-CUATRO intentan enviar, reciben ACK_BLOQUEADO y encolan localmente.
-Mientras siguen bloqueados, continuan generando lecturas y crece la cola.
-Cuando el semaforo libera permisos, sincronizan primero la cola pendiente.
+EC-UNO entra primero porque tiene prioridad/distancia favorable.
+EC-DOS, EC-TRES y EC-CUATRO intentan enviar, reciben ACK_BLOQUEADO, salen de esa conexion y encolan localmente.
+Mientras siguen bloqueados, continuan generando lecturas y crece la cola local.
+Cuando el semaforo libera el permiso, reconectan y sincronizan primero la cola pendiente.
 Despues de vaciar la cola, vuelven a enviar en tiempo real.
 Cuando pasan los 10 segundos de sismo, los clientes siguen conectados y enviando lecturas normales.
 ```
@@ -224,6 +224,7 @@ COLA_BLOQUEO_ENCOLADO
 COLA_DESBLOQUEADA_ENVIO_OK
 COLA_LOCAL_SINCRONIZADO
 TCP_LECTURA_BLOQUEADA
+TCP_CONEXION_RECHAZADA_POR_OCUPACION
 TCP_LECTURA_RECIBIDA
 PERMISO_OTORGADO
 PERMISO_LIBERADO
