@@ -17,11 +17,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import telemetria.RegistroMetricas;
 
 public class EstacionAcelTCP {
@@ -36,8 +34,9 @@ public class EstacionAcelTCP {
     private static final int TIMEOUT_MONITOR_MS = 400;
     private static final int PAUSA_REELECCION_MS = 1000;
     private static final long REVISION_PRIORIDAD_MS = 5000L;
-    private static final Set<String> EVENTOS_REPORTADOS =
-            Collections.synchronizedSet(new HashSet<String>());
+    private static final int MAX_LECTURAS_POR_EVENTO = 4;
+    private static final Map<String, Integer> EVENTOS_REPORTADOS =
+            Collections.synchronizedMap(new HashMap<String, Integer>());
 
     public static void main(String[] args) {
         try {
@@ -383,10 +382,13 @@ public class EstacionAcelTCP {
         }
         String claveEvento = idAcel + "|" + idEvento;
         synchronized (EVENTOS_REPORTADOS) {
-            if (EVENTOS_REPORTADOS.contains(claveEvento)) {
+            int lecturasEvento = EVENTOS_REPORTADOS.containsKey(claveEvento)
+                    ? EVENTOS_REPORTADOS.get(claveEvento).intValue()
+                    : 0;
+            if (lecturasEvento >= MAX_LECTURAS_POR_EVENTO) {
                 return null;
             }
-            EVENTOS_REPORTADOS.add(claveEvento);
+            EVENTOS_REPORTADOS.put(claveEvento, lecturasEvento + 1);
         }
         String magnitud = magnitudSismica(muestra.intensidad);
         String direccion = direccionMovimiento(muestra.x, muestra.y);
@@ -563,7 +565,8 @@ public class EstacionAcelTCP {
     private static void registrarFalloCoordinador(NodoServidor servidor, String idAcel, String fase, int secuencia,
             Exception ex) {
         String etiqueta = servidor == null ? "SIN_COORDINADOR" : servidor.etiqueta();
-        System.out.println("Fallo con coordinador " + etiqueta + ". Iniciando eleccion...");
+        System.out.println("FALLO SERVIDOR | " + idAcel + " no pudo usar " + etiqueta
+                + " -> buscando servidor de respaldo");
         RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("FALLO_COORDINADOR", "idAcel=" + idAcel, "fase=" + fase,
                         "seq=" + secuencia, "coordinador=" + etiqueta,
