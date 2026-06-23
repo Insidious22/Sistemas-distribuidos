@@ -12,7 +12,7 @@ public class ActivadorSismoClienteTCP {
 
     public static void main(String[] args) {
         String idEvento = args.length >= 1 ? args[0] : "SISMO-MANUAL-" + System.currentTimeMillis();
-        long duracionMs = args.length >= 2 ? Long.parseLong(args[1]) : 30000L;
+        long duracionMs = args.length >= 2 ? Long.parseLong(args[1]) : 10000L;
         long inicioMs = System.currentTimeMillis();
 
         File archivo = new File(ARCHIVO_SISMO);

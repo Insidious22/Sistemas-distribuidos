@@ -15,10 +15,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import telemetria.RegistroMetricas;
 
 public class EstacionAcelTCP {
@@ -33,6 +36,8 @@ public class EstacionAcelTCP {
     private static final int TIMEOUT_MONITOR_MS = 400;
     private static final int PAUSA_REELECCION_MS = 1000;
     private static final long REVISION_PRIORIDAD_MS = 5000L;
+    private static final Set<String> EVENTOS_REPORTADOS =
+            Collections.synchronizedSet(new HashSet<String>());
 
     public static void main(String[] args) {
         try {
@@ -73,6 +78,10 @@ public class EstacionAcelTCP {
                     if (puedeGenerar(indice, repeticiones, finNs)) {
                         LecturaPendiente lectura = crearLecturaPendiente(idAcel, indice, perfilSismo,
                                 "COLA_LOCAL", pendientes.size(), null);
+                        if (lectura == null) {
+                            esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
+                            continue;
+                        }
                         pendientes.add(lectura);
                         indice++;
                         registrarLecturaEncolada(lectura, "SIN_COORDINADOR", pendientes.size());
@@ -105,6 +114,10 @@ public class EstacionAcelTCP {
                                 ? pendientes.peek()
                                 : crearLecturaPendiente(idAcel, indice, perfilSismo, "TIEMPO_REAL",
                                         pendientes.size(), null);
+                        if (lectura == null) {
+                            esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
+                            continue;
+                        }
                         ResultadoEnvio resultado = enviarLectura(conexion, coordinador, idAcel, lectura,
                                 servidores);
                         if (resultado.esFallo()) {
@@ -132,6 +145,10 @@ public class EstacionAcelTCP {
                             } else if (puedeGenerar(indice, repeticiones, finNs)) {
                                 LecturaPendiente nuevaLocal = crearLecturaPendiente(idAcel, indice, perfilSismo,
                                         "COLA_BLOQUEO", pendientes.size() + 1, null);
+                                if (nuevaLocal == null) {
+                                    esperarSiguienteEnvio(intervaloMs, indice, repeticiones);
+                                    break;
+                                }
                                 pendientes.add(nuevaLocal);
                                 indice++;
                                 registrarLecturaEncolada(nuevaLocal, "BLOQUEO_SEMAFORO_CONTINUA_GENERANDO",
@@ -231,6 +248,7 @@ public class EstacionAcelTCP {
             Instant clienteAck = Instant.now();
             double tTxMs = (tiempoFinal - tiempoInicial) / 1_000_000.0;
             if (ack.startsWith("ACK_BLOQUEADO;")) {
+                imprimirAvisoServidor(ack);
                 if ("SI".equals(lectura.movimiento)) {
                     imprimirEstadoCliente("NO PUEDE ENVIAR - ENCOLADO", lectura, servidor, tTxMs);
                 }
@@ -267,6 +285,7 @@ public class EstacionAcelTCP {
             double idaEstimadaMs = redEstimadaMs / 2.0;
             double vueltaEstimadaMs = redEstimadaMs / 2.0;
 
+            imprimirAvisoServidor(ack);
             if ("SI".equals(lectura.movimiento)) {
                 imprimirEstadoCliente("ENVIANDO SISMO", lectura, servidor, tTxMs);
             }
@@ -324,6 +343,16 @@ public class EstacionAcelTCP {
         }
     }
 
+    private static void imprimirAvisoServidor(String ack) {
+        if (!"SI".equalsIgnoreCase(extraerCampo(ack, "SISMO_PREVIO", "NO"))) {
+            return;
+        }
+        System.out.println("AVISO SERVIDOR | ya hubo sismo en "
+                + extraerCampo(ack, "DIRECCION_PREVIA", "-")
+                + " reportado por " + extraerCampo(ack, "ID_ACEL_PREVIO", "-")
+                + " evento=" + extraerCampo(ack, "EVENTO_PREVIO", "-"));
+    }
+
     private static void imprimirEstadoCliente(String estado, LecturaPendiente lectura, NodoServidor servidor,
             double tTxMs) {
         System.out.printf(Locale.US,
@@ -349,6 +378,16 @@ public class EstacionAcelTCP {
                 ? sismoManual.muestra()
                 : (estadoManual != null && estadoManual.activo ? estadoManual.muestra() : perfil.muestra(indice));
         String idEvento = sismoManual != null ? sismoManual.idEvento : (estadoManual == null ? "-" : estadoManual.idEvento);
+        if (!muestra.movimiento) {
+            return null;
+        }
+        String claveEvento = idAcel + "|" + idEvento;
+        synchronized (EVENTOS_REPORTADOS) {
+            if (EVENTOS_REPORTADOS.contains(claveEvento)) {
+                return null;
+            }
+            EVENTOS_REPORTADOS.add(claveEvento);
+        }
         String magnitud = magnitudSismica(muestra.intensidad);
         String direccion = direccionMovimiento(muestra.x, muestra.y);
         int secuencia = indice + 1;

@@ -30,6 +30,8 @@ public class HiloDespachador implements Runnable {
     private static final List<NodoReplica> REPLICAS = Collections.synchronizedList(new ArrayList<NodoReplica>());
     private static final List<String> REPLICAS_PENDIENTES = Collections.synchronizedList(new ArrayList<String>());
     private static final Set<String> REPLICAS_RECIBIDAS = Collections.synchronizedSet(new HashSet<String>());
+    private static final ConcurrentHashMap<String, PrimerReporteSismo> PRIMEROS_REPORTES =
+            new ConcurrentHashMap<String, PrimerReporteSismo>();
     private static volatile boolean replicadorIniciado;
     private static AdministradorRecursosSismicos recursosSismicos;
     private static String idServidor = "SERVIDOR-ACEL";
@@ -244,6 +246,7 @@ public class HiloDespachador implements Runnable {
         Instant servidorRecibido = Instant.now();
         long tiempoInicial = System.nanoTime();
         LecturaTriaxial lectura = LecturaTriaxial.desdePayload(payload);
+        PrimerReporteSismo reportePrevio = obtenerReportePrevio(payload);
         AdministradorRecursosSismicos.ResultadoAdmision admision =
                 obtenerAdministradorRecursos().procesarLecturaEstacion(lectura.getIdAcel(), payload);
         long tiempoFinal = System.nanoTime();
@@ -258,7 +261,8 @@ public class HiloDespachador implements Runnable {
                     + ";MOTIVO:SEMAFORO_SATURADO;SERVIDOR_RECIBIDO:" + servidorRecibido
                     + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:" + RegistroMetricas.ms(procesamientoMs)
                     + ";ESPERA_SEMAFORO_MS:" + RegistroMetricas.ms(admision.getEsperaMs())
-                    + ";PERMISOS_DISPONIBLES:" + admision.getPermisosDisponibles());
+                    + ";PERMISOS_DISPONIBLES:" + admision.getPermisosDisponibles()
+                    + camposAvisoSismoPrevio(reportePrevio, lectura.getIdAcel()));
             RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_LECTURA_BLOQUEADA", "idAcel=" + lectura.getIdAcel(),
                             "seq=" + seq,
@@ -295,6 +299,7 @@ public class HiloDespachador implements Runnable {
         }
 
         estadisticas.registrarLectura(procesamientoMs);
+        reportePrevio = registrarPrimerReporteSiAplica(lectura.getIdAcel(), payload);
         imprimirResumenTerminal("RECIBIDO", lectura, payload, seq, servidorRecibido, procesamientoMs,
                 admision.getEsperaMs());
         encolarReplicaServidor(payload);
@@ -302,7 +307,8 @@ public class HiloDespachador implements Runnable {
                 + servidorRecibido + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:"
                 + RegistroMetricas.ms(procesamientoMs) + ";ESPERA_SEMAFORO_MS:"
                 + RegistroMetricas.ms(admision.getEsperaMs()) + ";PERMISOS_DISPONIBLES:"
-                + admision.getPermisosDisponibles());
+                + admision.getPermisosDisponibles()
+                + camposAvisoSismoPrevio(reportePrevio, lectura.getIdAcel()));
         RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("TCP_LECTURA_RECIBIDA", "idAcel=" + lectura.getIdAcel(), "seq=" + seq,
                         "cliente=" + direccionRemota(cliente), "servidorRecibido=" + servidorRecibido,
@@ -317,6 +323,48 @@ public class HiloDespachador implements Runnable {
                         "origen=" + extraerCampo(payload, "ORIGEN", "-"),
                         "payload=" + payload,
                         estadisticas.resumen()));
+    }
+
+    private static PrimerReporteSismo obtenerReportePrevio(String payload) {
+        if (!"SI".equalsIgnoreCase(extraerCampo(payload, "MOVIMIENTO", "NO"))) {
+            return null;
+        }
+        return PRIMEROS_REPORTES.get(extraerCampo(payload, "EVENTO_SISMO", "SISMO-SIN-ID"));
+    }
+
+    private static PrimerReporteSismo registrarPrimerReporteSiAplica(String idAcel, String payload) {
+        if (!"SI".equalsIgnoreCase(extraerCampo(payload, "MOVIMIENTO", "NO"))) {
+            return null;
+        }
+        String idEvento = extraerCampo(payload, "EVENTO_SISMO", "SISMO-SIN-ID");
+        PrimerReporteSismo nuevo = new PrimerReporteSismo(
+                idEvento,
+                idAcel,
+                extraerCampo(payload, "DIRECCION", "-"),
+                extraerCampo(payload, "MAGNITUD", "-"),
+                Instant.now());
+        PrimerReporteSismo previo = PRIMEROS_REPORTES.putIfAbsent(idEvento, nuevo);
+        if (previo == null) {
+            RegistroMetricas.escribir(LOG_SISMO,
+                    RegistroMetricas.linea("SISMO_PRIMER_REPORTE",
+                            "idEvento=" + idEvento,
+                            "idAcel=" + idAcel,
+                            "direccion=" + nuevo.direccion,
+                            "magnitud=" + nuevo.magnitud,
+                            "instante=" + nuevo.instante));
+            return nuevo;
+        }
+        return previo;
+    }
+
+    private static String camposAvisoSismoPrevio(PrimerReporteSismo reporte, String idAcelActual) {
+        if (reporte == null || reporte.idAcel.equals(idAcelActual)) {
+            return ";SISMO_PREVIO:NO";
+        }
+        return ";SISMO_PREVIO:SI;ID_ACEL_PREVIO:" + reporte.idAcel
+                + ";DIRECCION_PREVIA:" + reporte.direccion
+                + ";MAGNITUD_PREVIA:" + reporte.magnitud
+                + ";EVENTO_PREVIO:" + reporte.idEvento;
     }
 
     private static void procesarReplicaServidor(String linea, PrintWriter salida) {
@@ -581,6 +629,23 @@ public class HiloDespachador implements Runnable {
 
         private String etiqueta() {
             return host + ":" + puerto;
+        }
+    }
+
+    private static final class PrimerReporteSismo {
+        private final String idEvento;
+        private final String idAcel;
+        private final String direccion;
+        private final String magnitud;
+        private final Instant instante;
+
+        private PrimerReporteSismo(String idEvento, String idAcel, String direccion, String magnitud,
+                Instant instante) {
+            this.idEvento = idEvento;
+            this.idAcel = idAcel;
+            this.direccion = direccion;
+            this.magnitud = magnitud;
+            this.instante = instante;
         }
     }
 }
