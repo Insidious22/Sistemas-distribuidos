@@ -57,8 +57,6 @@ public class AdministradorRecursosSismicos {
         long esperaInicialNs = System.nanoTime();
 
         try {
-            System.out.println("[Control] Estacion " + idEstacion + " esperando permiso del semaforo. Permisos disponibles: "
-                    + semaforoAdmision.availablePermits());
             RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.evento("SEMAFORO", "ESPERA_COLA", idEstacion,
                             "dispAntes=" + semaforoAdmision.availablePermits(),
@@ -67,8 +65,6 @@ public class AdministradorRecursosSismicos {
             if (!semaforoAdmision.tryAcquire()) {
                 Thread.sleep(AVISO_BLOQUEO_MS);
                 double esperaBloqueoMs = (System.nanoTime() - esperaInicialNs) / 1_000_000.0;
-                System.out.println("[Bloqueo] Estacion " + idEstacion
-                        + " no obtuvo permiso. Debe guardar lectura en cola local.");
                 RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.evento("SEMAFORO", "LECTURA_BLOQUEADA", idEstacion,
                                 "esperaAvisoMs=" + RegistroMetricas.ms(esperaBloqueoMs),
@@ -84,8 +80,6 @@ public class AdministradorRecursosSismicos {
             double esperaMs = (esperaFinalNs - esperaInicialNs) / 1_000_000.0;
             long timestampProcesamiento = System.currentTimeMillis();
 
-            System.out.println("[Admision] Permiso concedido a " + idEstacion + ". Espera: "
-                    + RegistroMetricas.ms(esperaMs) + " ms");
             RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.evento("SEMAFORO", "PERMISO_OTORGADO", idEstacion,
                             "esperaMs=" + RegistroMetricas.ms(esperaMs),
@@ -105,7 +99,6 @@ public class AdministradorRecursosSismicos {
         } finally {
             if (permisoAdquirido) {
                 semaforoAdmision.release();
-                System.out.println("[Liberacion] " + idEstacion + " libero el permiso del semaforo.");
                 RegistroMetricas.escribir(LOG_SISMO,
                         RegistroMetricas.evento("SEMAFORO", "PERMISO_LIBERADO", idEstacion,
                                 "dispDespues=" + semaforoAdmision.availablePermits(),
@@ -356,6 +349,27 @@ public class AdministradorRecursosSismicos {
             RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.evento("CRITICA", "SALE_BITACORA", idEstacion,
                             "monitor=synchronized", "hilo=" + Thread.currentThread().getName()));
+        }
+    }
+
+    public synchronized void registrarReplicaServidor(String idServidorOrigen, String tramaDatos) {
+        long timestampProcesamiento = System.currentTimeMillis();
+        try (FileWriter fw = new FileWriter(archivoBitacora, true);
+                BufferedWriter bw = new BufferedWriter(fw);
+                PrintWriter out = new PrintWriter(bw)) {
+            out.println("TS_SERV:" + timestampProcesamiento + ";REPLICA_DE:" + idServidorOrigen + ";" + tramaDatos);
+            RegistroMetricas.escribir(LOG_SISMO,
+                    RegistroMetricas.linea("REPLICA_SERVIDOR_RECIBIDA",
+                            "origenServidor=" + idServidorOrigen,
+                            "idAcel=" + extraerCampo(tramaDatos, "ID_ACEL", "-"),
+                            "seq=" + extraerCampo(tramaDatos, "SEQ", "-"),
+                            "payload=" + tramaDatos));
+        } catch (IOException ex) {
+            RegistroMetricas.escribir(LOG_SISMO,
+                    RegistroMetricas.linea("REPLICA_SERVIDOR_ERROR",
+                            "origenServidor=" + idServidorOrigen,
+                            "error=" + ex.getClass().getSimpleName(),
+                            "detalle=" + ex.getMessage()));
         }
     }
 

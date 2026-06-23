@@ -5,18 +5,32 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import telemetria.RegistroMetricas;
 
 public class HiloDespachador implements Runnable {
     private static final String LOG_SISMO = "sismo_distribuido.log";
     private static final ConcurrentHashMap<String, EstadisticasCliente> CLIENTES = new ConcurrentHashMap<String, EstadisticasCliente>();
+    private static final ConcurrentHashMap<String, Long> ULTIMO_ENVIO_CLIENTE_MS = new ConcurrentHashMap<String, Long>();
+    private static final ConcurrentHashMap<String, Long> ULTIMA_LLEGADA_SERVIDOR_MS = new ConcurrentHashMap<String, Long>();
+    private static final List<NodoReplica> REPLICAS = Collections.synchronizedList(new ArrayList<NodoReplica>());
+    private static final List<String> REPLICAS_PENDIENTES = Collections.synchronizedList(new ArrayList<String>());
+    private static final Set<String> REPLICAS_RECIBIDAS = Collections.synchronizedSet(new HashSet<String>());
+    private static volatile boolean replicadorIniciado;
     private static AdministradorRecursosSismicos recursosSismicos;
     private static String idServidor = "SERVIDOR-ACEL";
     private static int prioridadServidor = 1;
@@ -39,6 +53,37 @@ public class HiloDespachador implements Runnable {
         RegistroMetricas.escribir(LOG_SISMO,
                 RegistroMetricas.linea("NODO_SERVIDOR_CONFIGURADO", "idServidor=" + idServidor,
                         "prioridad=" + prioridadServidor, "puerto=" + puertoServidor));
+    }
+
+    public static void configurarReplicas(String replicasTexto) {
+        REPLICAS.clear();
+        if (replicasTexto != null && !replicasTexto.trim().isEmpty()) {
+            String[] partes = replicasTexto.split(",");
+            for (String parte : partes) {
+                NodoReplica replica = NodoReplica.desdeTexto(parte.trim());
+                if (replica != null) {
+                    REPLICAS.add(replica);
+                }
+            }
+        }
+        iniciarReplicadorSiHaceFalta();
+    }
+
+    private static synchronized void iniciarReplicadorSiHaceFalta() {
+        if (replicadorIniciado) {
+            return;
+        }
+        replicadorIniciado = true;
+        Thread hilo = new Thread(new Runnable() {
+            public void run() {
+                while (true) {
+                    sincronizarReplicasPendientes();
+                    dormir(3000L);
+                }
+            }
+        }, "replicador-servidor");
+        hilo.setDaemon(true);
+        hilo.start();
     }
 
     @Override
@@ -82,13 +127,16 @@ public class HiloDespachador implements Runnable {
                     continue;
                 }
 
+                if (linea.startsWith("REPLICA_LECTURA;")) {
+                    procesarReplicaServidor(linea, salida);
+                    continue;
+                }
+
                 if (linea.startsWith("SUSCRIBIR_ALERTAS;")) {
                     idSesion = extraerCampo(linea, "ID_ACEL", idSesion);
                     clienteRemoto = direccionRemota(cliente);
                     GestorAlertasSismo.registrar(idSesion, salida, clienteRemoto);
                     salida.println("ACK_SUSCRIPCION_ALERTAS;ID_ACEL:" + idSesion + ";RECIBIDO:" + Instant.now());
-                    System.out.println("Cliente suscrito a alertas de sismo: " + idSesion + " desde "
-                            + clienteRemoto);
                     continue;
                 }
 
@@ -121,8 +169,6 @@ public class HiloDespachador implements Runnable {
                             id -> new EstadisticasCliente(id, remotoIdentificado));
                     salida.println("ACK_HELLO:" + idSesion + ";ID_SERV:" + idServidor + ";PRIORIDAD:"
                             + prioridadServidor + ";RECIBIDO:" + Instant.now());
-                    System.out.println("Cliente TCP conectado permanentemente: " + idSesion + " desde "
-                            + clienteRemoto);
                     RegistroMetricas.escribir(LOG_SISMO,
                             RegistroMetricas.linea("TCP_CLIENTE_CONECTADO", "idAcel=" + idSesion,
                                     "cliente=" + clienteRemoto, "idServidor=" + idServidor,
@@ -156,12 +202,10 @@ public class HiloDespachador implements Runnable {
 
                 procesarLectura(cliente, salida, linea, estadisticas);
             }
-            System.out.println("Cliente desconectado: " + idSesion + " desde " + clienteRemoto);
             RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_CLIENTE_DESCONECTADO", "idAcel=" + idSesion,
                             "cliente=" + clienteRemoto, "modo=FIN_DE_STREAM"));
         } catch (SocketException ex) {
-            System.out.println("Cliente desconectado abruptamente: " + idSesion + " desde " + clienteRemoto);
             RegistroMetricas.escribir(LOG_SISMO,
                     RegistroMetricas.linea("TCP_CLIENTE_DESCONECTADO", "idAcel=" + idSesion,
                             "cliente=" + clienteRemoto, "modo=ABRUPTO",
@@ -200,8 +244,8 @@ public class HiloDespachador implements Runnable {
         Instant servidorAck = Instant.now();
 
         if (admision.isBloqueado()) {
-            System.out.println("TCP bloqueado por semaforo desde " + direccionRemota(cliente) + " -> "
-                    + lectura + " SEQ=" + seq);
+            imprimirResumenTerminal("BLOQUEADO", lectura, payload, seq, servidorRecibido, procesamientoMs,
+                    admision.getEsperaMs());
             salida.println("ACK_BLOQUEADO;ID_ACEL:" + lectura.getIdAcel() + ";SEQ:" + seq
                     + ";MOTIVO:SEMAFORO_SATURADO;SERVIDOR_RECIBIDO:" + servidorRecibido
                     + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:" + RegistroMetricas.ms(procesamientoMs)
@@ -243,7 +287,9 @@ public class HiloDespachador implements Runnable {
         }
 
         estadisticas.registrarLectura(procesamientoMs);
-        System.out.println("TCP recibido desde " + direccionRemota(cliente) + " -> " + lectura + " SEQ=" + seq);
+        imprimirResumenTerminal("RECIBIDO", lectura, payload, seq, servidorRecibido, procesamientoMs,
+                admision.getEsperaMs());
+        encolarReplicaServidor(payload);
         salida.println("ACK_TCP;ID_ACEL:" + lectura.getIdAcel() + ";SEQ:" + seq + ";SERVIDOR_RECIBIDO:"
                 + servidorRecibido + ";SERVIDOR_ACK:" + servidorAck + ";SERVIDOR_PROC_MS:"
                 + RegistroMetricas.ms(procesamientoMs) + ";ESPERA_SEMAFORO_MS:"
@@ -263,6 +309,168 @@ public class HiloDespachador implements Runnable {
                         "origen=" + extraerCampo(payload, "ORIGEN", "-"),
                         "payload=" + payload,
                         estadisticas.resumen()));
+    }
+
+    private static void procesarReplicaServidor(String linea, PrintWriter salida) {
+        String origenServidor = extraerCampo(linea, "ID_SERV_ORIGEN", "SERVIDOR-DESCONOCIDO");
+        String payloadB64 = extraerCampo(linea, "PAYLOAD_B64", "");
+        try {
+            String payload = new String(Base64.getDecoder().decode(payloadB64), StandardCharsets.UTF_8);
+            String clave = claveReplica(origenServidor, payload);
+            if (REPLICAS_RECIBIDAS.add(clave)) {
+                obtenerAdministradorRecursos().registrarReplicaServidor(origenServidor, payload);
+                System.out.println("REPLICA  | desde " + origenServidor + " | "
+                        + extraerCampo(payload, "ID_ACEL", "-") + " seq=" + extraerCampo(payload, "SEQ", "-")
+                        + " sincronizada");
+            }
+            salida.println("ACK_REPLICA_OK;ID_SERV:" + idServidor + ";ORIGEN:" + origenServidor
+                    + ";RECIBIDO:" + Instant.now());
+        } catch (Exception ex) {
+            salida.println("ACK_REPLICA_ERROR;ID_SERV:" + idServidor + ";ERROR:"
+                    + ex.getClass().getSimpleName());
+            RegistroMetricas.escribir(LOG_SISMO,
+                    RegistroMetricas.linea("REPLICA_SERVIDOR_ERROR",
+                            "origenServidor=" + origenServidor,
+                            "error=" + ex.getClass().getSimpleName(),
+                            "detalle=" + ex.getMessage()));
+        }
+    }
+
+    private static void encolarReplicaServidor(String payload) {
+        if (REPLICAS.isEmpty()) {
+            return;
+        }
+        synchronized (REPLICAS_PENDIENTES) {
+            REPLICAS_PENDIENTES.add(payload);
+        }
+        sincronizarReplicasPendientes();
+    }
+
+    private static void sincronizarReplicasPendientes() {
+        if (REPLICAS.isEmpty() || REPLICAS_PENDIENTES.isEmpty()) {
+            return;
+        }
+
+        List<String> copia;
+        synchronized (REPLICAS_PENDIENTES) {
+            copia = new ArrayList<String>(REPLICAS_PENDIENTES);
+        }
+
+        for (String payload : copia) {
+            boolean replicado = false;
+            synchronized (REPLICAS) {
+                for (NodoReplica replica : REPLICAS) {
+                    if (enviarReplica(replica, payload)) {
+                        replicado = true;
+                        break;
+                    }
+                }
+            }
+            if (replicado) {
+                synchronized (REPLICAS_PENDIENTES) {
+                    REPLICAS_PENDIENTES.remove(payload);
+                }
+            }
+        }
+    }
+
+    private static boolean enviarReplica(NodoReplica replica, String payload) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(replica.host, replica.puerto), 800);
+            socket.setSoTimeout(1200);
+            BufferedReader entrada = new BufferedReader(
+                    new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            PrintWriter salida = new PrintWriter(
+                    new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+            String payloadB64 = Base64.getEncoder().encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+            salida.println("REPLICA_LECTURA;ID_SERV_ORIGEN:" + idServidor + ";PAYLOAD_B64:" + payloadB64
+                    + ";ENVIADO:" + Instant.now());
+            String ack = entrada.readLine();
+            boolean ok = ack != null && ack.startsWith("ACK_REPLICA_OK;");
+            if (ok) {
+                RegistroMetricas.escribir(LOG_SISMO,
+                        RegistroMetricas.linea("REPLICA_SERVIDOR_ENVIADA",
+                                "destino=" + replica.etiqueta(),
+                                "idAcel=" + extraerCampo(payload, "ID_ACEL", "-"),
+                                "seq=" + extraerCampo(payload, "SEQ", "-"),
+                                "pendientes=" + REPLICAS_PENDIENTES.size()));
+            }
+            return ok;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private static String claveReplica(String origenServidor, String payload) {
+        return origenServidor + "|" + extraerCampo(payload, "ID_ACEL", "-") + "|"
+                + extraerCampo(payload, "SEQ", "-") + "|" + extraerCampo(payload, "TIMESTAMP", "-");
+    }
+
+    private static void imprimirResumenTerminal(String estado, LecturaTriaxial lectura, String payload, String seq,
+            Instant servidorRecibido, double procesamientoMs, double esperaMs) {
+        String idAcel = lectura.getIdAcel();
+        String movimiento = extraerCampo(payload, "MOVIMIENTO", "-");
+        String intensidad = extraerCampo(payload, "INTENSIDAD", "-");
+        String ejeX = extraerCampo(payload, "EJE_X", "-");
+        String ejeY = extraerCampo(payload, "EJE_Y", "-");
+        String ejeZ = extraerCampo(payload, "EJE_Z", "-");
+        String origen = extraerCampo(payload, "ORIGEN", "-");
+        String pendientes = extraerCampo(payload, "PENDIENTES_CLIENTE", "0");
+        String intervaloEnvio = calcularIntervaloEnvio(idAcel, extraerCampo(payload, "TIMESTAMP", ""));
+        String intervaloLlegada = calcularIntervaloLlegada(idAcel, servidorRecibido);
+        String hora = servidorRecibido.toString();
+        if (hora.length() >= 19) {
+            hora = hora.substring(11, 19);
+        }
+
+        System.out.printf(Locale.US,
+                "%s | %-9s | %-8s seq=%s mov=%s int=%s x=%s y=%s z=%s origen=%s pend=%s envioCada=%s llegaCada=%s proc=%s ms espera=%s ms%n",
+                hora,
+                estado,
+                idAcel,
+                seq,
+                movimiento,
+                intensidad,
+                ejeX,
+                ejeY,
+                ejeZ,
+                origen,
+                pendientes,
+                intervaloEnvio,
+                intervaloLlegada,
+                RegistroMetricas.ms(procesamientoMs),
+                RegistroMetricas.ms(esperaMs));
+    }
+
+    private static String calcularIntervaloEnvio(String idAcel, String timestampTexto) {
+        try {
+            long actualMs = Instant.parse(timestampTexto).toEpochMilli();
+            Long anteriorMs = ULTIMO_ENVIO_CLIENTE_MS.get(idAcel);
+            if (anteriorMs == null || actualMs <= anteriorMs.longValue()) {
+                ULTIMO_ENVIO_CLIENTE_MS.put(idAcel, actualMs);
+                return "-";
+            }
+            ULTIMO_ENVIO_CLIENTE_MS.put(idAcel, actualMs);
+            return formatoIntervalo(actualMs - anteriorMs.longValue());
+        } catch (Exception ex) {
+            return "-";
+        }
+    }
+
+    private static String calcularIntervaloLlegada(String idAcel, Instant llegada) {
+        long actualMs = llegada.toEpochMilli();
+        Long anteriorMs = ULTIMA_LLEGADA_SERVIDOR_MS.put(idAcel, actualMs);
+        if (anteriorMs == null || actualMs <= anteriorMs.longValue()) {
+            return "-";
+        }
+        return formatoIntervalo(actualMs - anteriorMs.longValue());
+    }
+
+    private static String formatoIntervalo(long deltaMs) {
+        if (deltaMs >= 1000L) {
+            return String.format(Locale.US, "%.1fs", deltaMs / 1000.0);
+        }
+        return deltaMs + "ms";
     }
 
     private static void procesarLogCliente(String linea, String clienteRemoto, PrintWriter salida) {
@@ -318,6 +526,14 @@ public class HiloDespachador implements Runnable {
         return campos;
     }
 
+    private static void dormir(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private String direccionRemota() {
         return direccionRemota(socket);
     }
@@ -327,6 +543,32 @@ public class HiloDespachador implements Runnable {
             return String.valueOf(cliente.getRemoteSocketAddress());
         } catch (Exception ex) {
             return "desconocido";
+        }
+    }
+
+    private static final class NodoReplica {
+        private final String host;
+        private final int puerto;
+
+        private NodoReplica(String host, int puerto) {
+            this.host = host;
+            this.puerto = puerto;
+        }
+
+        private static NodoReplica desdeTexto(String texto) {
+            if (texto == null || texto.isEmpty()) {
+                return null;
+            }
+            int separador = texto.lastIndexOf(':');
+            if (separador <= 0 || separador >= texto.length() - 1) {
+                return null;
+            }
+            return new NodoReplica(texto.substring(0, separador),
+                    Integer.parseInt(texto.substring(separador + 1)));
+        }
+
+        private String etiqueta() {
+            return host + ":" + puerto;
         }
     }
 }

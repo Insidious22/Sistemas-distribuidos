@@ -19,21 +19,25 @@ public class ServidorAcelTCP {
         String idServidor = args.length >= 3 ? args[2] : ID_SERVIDOR_DEFECTO + "-" + puerto;
         int prioridadServidor = args.length >= 4 ? Integer.parseInt(args[3]) : PRIORIDAD_DEFECTO;
         long retardoCriticoMs = args.length >= 5 ? Long.parseLong(args[4]) : RETARDO_CRITICO_DEFECTO_MS;
+        String replicas = args.length >= 6 ? args[5] : "";
         HiloDespachador.configurarAdministradorRecursos(
                 new AdministradorRecursosSismicos(permisosConcurrentes, retardoCriticoMs));
         HiloDespachador.configurarNodoServidor(idServidor, prioridadServidor, puerto);
+        HiloDespachador.configurarReplicas(replicas);
 
         try (ServerSocket servidor = new ServerSocket(puerto)) {
             System.out.println("Servidor TCP de acelerografos escuchando en puerto " + puerto);
             System.out.println("Nodo de redundancia: " + idServidor + " prioridad=" + prioridadServidor);
             System.out.println("Semaforo de admision configurado con " + permisosConcurrentes + " permiso(s).");
             System.out.println("Retardo de zona critica configurado en " + retardoCriticoMs + " ms.");
+            if (!replicas.trim().isEmpty()) {
+                System.out.println("Replicacion automatica hacia: " + replicas);
+            }
             System.out.println("Informe a los clientes la IP LAN de esta maquina. Use Ctrl + C para detener.");
 
             while (!servidor.isClosed()) {
                 try {
                     Socket socketCliente = servidor.accept();
-                    System.out.println("Conexion TCP aceptada desde " + socketCliente.getRemoteSocketAddress());
                     Thread hilo = new Thread(new HiloDespachador(socketCliente), "hilo-acel-" + socketCliente.getPort());
                     hilo.setUncaughtExceptionHandler((thread, error) -> {
                         RegistroMetricas.escribir(LOG_SISMO,
