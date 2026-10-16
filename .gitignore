@@ -1,4 +1,27 @@
+# Compilados de Java
+out/
+bin/
+*.class
+
+# Empaquetados y respaldos
+*.zip
+*.rar
+*.jar
+
+# Material de apoyo de la asignatura
+*.pdf
+
+# Respaldos locales del material original
+respaldo_original/
+
+# Salida en tiempo de ejecucion
 logs/
 **/logs/
 bitacora_sismica.txt
 **/bitacora_sismica.txt
+
+# Entornos y editores
+.idea/
+.vscode/
+*.iml
+.DS_Store
